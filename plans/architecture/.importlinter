@@ -1,0 +1,27 @@
+[importlinter]
+root_package = yerba_mate_reduction
+
+[importlinter:contract:layers]
+name = Enforce layered architecture
+type = layers
+layers =
+    presentation
+    application
+    domain
+    infrastructure
+
+[importlinter:contract:independence]
+name = Domain layer independence
+type = forbidden
+source_modules =
+    yerba_mate_reduction.domain
+forbidden_modules =
+    yerba_mate_reduction.presentation
+    yerba_mate_reduction.application
+    yerba_mate_reduction.infrastructure
+
+[importlinter:contract:no-cycles]
+name = Prevent circular dependencies
+type = independence
+modules =
+    yerba_mate_reduction
