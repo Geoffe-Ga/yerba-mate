@@ -83,8 +83,7 @@ def status_embed(
 
     if actual:
         lines.append(
-            f"{'Actual':>8}  {actual.small:>5}  "
-            f"{actual.large:>5}  {actual.total_mg:>5}"
+            f"{'Actual':>8}  {actual.small:>5}  {actual.large:>5}  {actual.total_mg:>5}"
         )
     else:
         lines.append(f"{'Actual':>8}{'(not logged)':>20}")
@@ -113,7 +112,7 @@ def log_confirmation_embed(
 
     lines = [f"{'':>8}  {'Small':>5}  {'Large':>5}  {'mg':>5}", "\u2500" * 28]
     lines.append(
-        f"{'Actual':>8}  {actual.small:>5}  " f"{actual.large:>5}  {actual.total_mg:>5}"
+        f"{'Actual':>8}  {actual.small:>5}  {actual.large:>5}  {actual.total_mg:>5}"
     )
     if plan_day:
         lines.append(

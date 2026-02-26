@@ -110,7 +110,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest \
-            --cov=. \
+            --cov=yerba_mate_reduction \
             --cov-report=xml:coverage.xml \
             --cov-report=html:htmlcov \
             --cov-report=term-missing \
@@ -119,7 +119,6 @@ jobs:
             --junitxml=pytest-report.xml \
             --verbose \
             --tb=short \
-            -n auto \
             --timeout=300
         continue-on-error: false
 

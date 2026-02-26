@@ -22,17 +22,38 @@ class PlanDay:
     total_mg: int
 
 
-def generate_plan(small: int, large: int, start_date: date) -> list[PlanDay]:
+def generate_plan(
+    small: int,
+    large: int,
+    start_date: date,
+    *,
+    skip_hold: bool = False,
+) -> list[PlanDay]:
     """Generate a caffeine tapering plan.
 
     Args:
         small: Starting number of small drinks per day.
         large: Starting number of large drinks per day.
         start_date: First day of the plan.
+        skip_hold: If True, skip the initial 2-day hold and begin
+            reducing immediately (used by /adjust).
 
     Returns:
         Ordered list of PlanDay entries (each level held for 2 days).
     """
+    plan = _build_plan(small, large, start_date)
+
+    if skip_hold and len(plan) > 2:
+        # Drop the initial 2-day hold and re-date from start_date
+        plan = plan[2:]
+        for idx, p in enumerate(plan):
+            p.date = start_date + timedelta(days=idx)
+
+    return plan
+
+
+def _build_plan(small: int, large: int, start_date: date) -> list[PlanDay]:
+    """Core reduction algorithm — always includes the initial hold."""
     caffeine = (SMALL_MG * small) + (LARGE_MG * large)
     day = start_date
 

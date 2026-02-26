@@ -6,6 +6,8 @@ STOP = 115
 
 
 class Plan:
+    """A single day in the original tapering plan."""
+
     __slots__ = ("date", "large", "small", "total")
 
     def __init__(
@@ -20,11 +22,13 @@ class Plan:
         self.large = str(larges)
         self.total = total
 
-    def to_dict(self):
-        return {k: getattr(self, k) for k in self.FIELDS}
+    def to_dict(self) -> dict[str, object]:
+        """Convert Plan to a dictionary."""
+        return {k: getattr(self, k) for k in self.__slots__}
 
 
 def main(small_count: int, large_count: int, start_date: str) -> None:
+    """Generate and print a caffeine tapering schedule as TSV."""
     day = datetime.strptime(start_date, "%Y-%m-%d")
     caffeine = (SMALL * small_count) + (LARGE * large_count)
 

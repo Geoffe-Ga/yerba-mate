@@ -79,6 +79,7 @@ class YerbaCog(commands.Cog):
         replaced = db.get_actual(target) is not None
         db.upsert_actual(target, small=small, large=large)
         actual = db.get_actual(target)
+        assert actual is not None  # just upserted
         plan_day = db.get_plan_day(target)
         embed = formatters.log_confirmation_embed(actual, plan_day, replaced=replaced)
         await interaction.response.send_message(embed=embed)
@@ -119,6 +120,7 @@ class YerbaCog(commands.Cog):
 
         db.upsert_actual(today, small=sm, large=lg)
         actual = db.get_actual(today)
+        assert actual is not None  # just upserted
         plan_day = db.get_plan_day(today)
         embed = formatters.log_confirmation_embed(actual, plan_day, replaced=False)
         embed.title = f"Extra {size} added — {today}"
@@ -149,9 +151,12 @@ class YerbaCog(commands.Cog):
         tomorrow = date.today() + timedelta(days=1)
 
         if not keep:
-            # Regenerate plan from actual consumption level starting tomorrow
+            # Regenerate plan reducing immediately from actual level
             new_plan = generate_plan(
-                small=recent.small, large=recent.large, start_date=tomorrow
+                small=recent.small,
+                large=recent.large,
+                start_date=tomorrow,
+                skip_hold=True,
             )
             db.replace_plan_from_date(new_plan, from_date=tomorrow)
             full_plan = db.get_all_plan_days()
@@ -178,7 +183,10 @@ class YerbaCog(commands.Cog):
             if target_day is None:
                 # Actual is already below entire plan — just replan
                 new_plan = generate_plan(
-                    small=recent.small, large=recent.large, start_date=tomorrow
+                    small=recent.small,
+                    large=recent.large,
+                    start_date=tomorrow,
+                    skip_hold=True,
                 )
                 db.replace_plan_from_date(new_plan, from_date=tomorrow)
                 full_plan = db.get_all_plan_days()

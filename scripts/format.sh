@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# scripts/format.sh - Format code with Black and isort
-# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+# scripts/format.sh - Format code with Ruff (formatter + import sorting)
+# Usage: ./scripts/format.sh [--check] [--verbose] [--help]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-FIX=false
 CHECK=false
 VERBOSE=false
 
@@ -15,7 +14,7 @@ VERBOSE=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --fix)
-            FIX=true
+            # Kept for backwards compat; format is the default mode
             shift
             ;;
         --check)
@@ -30,7 +29,7 @@ while [[ $# -gt 0 ]]; do
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Format code using Black and isort.
+Format code using Ruff formatter (replaces Black + isort).
 
 OPTIONS:
     --fix       Apply formatting changes (default)
@@ -44,9 +43,9 @@ EXIT CODES:
     2           Error running checks
 
 EXAMPLES:
-    $(basename "$0") --fix         # Apply formatting
-    $(basename "$0") --check       # Check only
-    $(basename "$0") --verbose     # Show detailed output
+    $(basename "$0")              # Apply formatting
+    $(basename "$0") --check      # Check only
+    $(basename "$0") --verbose    # Show detailed output
 EOF
             exit 0
             ;;
@@ -64,30 +63,13 @@ if $VERBOSE; then
     set -x
 fi
 
-echo "=== Formatting (Black + isort) ==="
+echo "=== Formatting (Ruff) ==="
 
-# Determine mode
 if $CHECK; then
-    MODE="--check"
-else
-    MODE=""
-fi
-
-# Run isort
-if $VERBOSE; then
-    echo "Running isort..."
-fi
-isort $MODE . || { echo "✗ isort failed" >&2; exit 1; }
-
-# Run Black
-if $VERBOSE; then
-    echo "Running Black..."
-fi
-black $MODE . || { echo "✗ Black failed" >&2; exit 1; }
-
-if [ -n "$MODE" ]; then
+    ruff format --check . || { echo "✗ Formatting check failed" >&2; exit 1; }
     echo "✓ Code formatting check passed"
 else
+    ruff format . || { echo "✗ Formatting failed" >&2; exit 1; }
     echo "✓ Code formatted successfully"
 fi
 exit 0
