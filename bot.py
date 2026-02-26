@@ -27,7 +27,7 @@ scheduler = AsyncIOScheduler()
 async def daily_ping() -> None:
     """Send daily target reminder to the configured channel."""
     channel = bot.get_channel(PING_CHANNEL_ID)
-    if channel is None:
+    if channel is None or not isinstance(channel, discord.TextChannel):
         return
     today = date.today()
     plan_day = db.get_plan_day(today)
@@ -47,6 +47,7 @@ async def on_ready() -> None:
         CronTrigger(hour=6, minute=0, timezone="US/Pacific"),
         id="daily_ping",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
     scheduler.start()
     print(f"Bot ready as {bot.user} — commands synced, scheduler started.")

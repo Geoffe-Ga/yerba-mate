@@ -10,10 +10,10 @@ import discord
 if TYPE_CHECKING:
     from planner import PlanDay
 
-# Shared column layout used by plan, history, and status tables.
-# Date(10) + Small(7) + Large(7) + mg(6) + Drop(6) = 40 chars
-_HDR = f"{'Date':<10}  {'Small':>5}  {'Large':>5}  {'mg':>5}  {'Drop':>5}"
-_SEP = "\u2500" * 40
+# Target ~34 chars wide for mobile Discord code blocks.
+# Date(5) Sm(3) Lg(3) mg(4) Drop(4) + separators = ~34
+_HDR = f"{'Date':<5} {'Sm':>2} {'Lg':>2} {'mg':>4} {'Drop':>4}"
+_SEP = "\u2500" * 22
 
 
 def _format_drinks(small: int, large: int) -> str:
@@ -26,10 +26,14 @@ def _format_drinks(small: int, large: int) -> str:
     return ", ".join(parts) if parts else "none"
 
 
+def _ds(d: date) -> str:
+    """Short date: MM/DD."""
+    return d.strftime("%m/%d")
+
+
 def _row(d: date, small: int, large: int, mg: int, drop: str = "") -> str:
     """Format one row in the standard table layout."""
-    ds = d.strftime("%b %d")
-    return f"{ds:<10}  {small:>5}  {large:>5}  {mg:>5}  {drop:>5}"
+    return f"{_ds(d):<5} {small:>2} {large:>2} {mg:>4} {drop:>4}"
 
 
 def _make_table(lines: list[str]) -> str:
@@ -63,36 +67,38 @@ def plan_embed(plan: list[PlanDay]) -> discord.Embed:
 
 
 def status_embed(
-    plan_day: PlanDay | None, actual: PlanDay | None, today: date
+    plan_day: PlanDay | None,
+    actual: PlanDay | None,
+    today: date,
 ) -> discord.Embed:
     """Format today's status as a compact table."""
     embed = discord.Embed(
-        title=f"Status \u2014 {today.strftime('%b %d, %Y')}",
+        title=f"Status \u2014 {today.strftime('%b %d')}",
         color=discord.Color.blue(),
     )
 
-    lines = [f"{'':>8}  {'Small':>5}  {'Large':>5}  {'mg':>5}", "\u2500" * 28]
+    hdr = f"{'':>6} {'Sm':>2} {'Lg':>2} {'mg':>4}"
+    lines = [hdr, "\u2500" * 17]
 
     if plan_day:
         lines.append(
-            f"{'Plan':>8}  {plan_day.small:>5}  "
-            f"{plan_day.large:>5}  {plan_day.total_mg:>5}"
+            f"{'Plan':>6} {plan_day.small:>2} "
+            f"{plan_day.large:>2} {plan_day.total_mg:>4}"
         )
     else:
-        lines.append(f"{'Plan':>8}{'(no plan)':>20}")
+        lines.append(f"{'Plan':>6}  (no plan)")
 
     if actual:
         lines.append(
-            f"{'Actual':>8}  {actual.small:>5}  {actual.large:>5}  {actual.total_mg:>5}"
+            f"{'Actual':>6} {actual.small:>2} {actual.large:>2} {actual.total_mg:>4}"
         )
     else:
-        lines.append(f"{'Actual':>8}{'(not logged)':>20}")
+        lines.append(f"{'Actual':>6}  (not logged)")
 
     if plan_day and actual:
         delta = actual.total_mg - plan_day.total_mg
         sign = "+" if delta > 0 else ""
-        lines.append("")
-        lines.append(f"{'Delta':>8}  {'':>5}  {'':>5}  {sign}{delta:>4}")
+        lines.append(f"{'Delta':>6} {'':>2} {'':>2} {sign}{delta:>3}")
 
     embed.description = _make_table(lines)
     return embed
@@ -102,7 +108,7 @@ def log_confirmation_embed(
     actual: PlanDay, plan_day: PlanDay | None, replaced: bool
 ) -> discord.Embed:
     """Confirmation embed after logging consumption."""
-    title = f"Logged \u2014 {actual.date.strftime('%b %d, %Y')}"
+    title = f"Logged \u2014 {actual.date.strftime('%b %d')}"
     if replaced:
         title += " (updated)"
     embed = discord.Embed(
@@ -110,19 +116,19 @@ def log_confirmation_embed(
         color=discord.Color.gold() if replaced else discord.Color.green(),
     )
 
-    lines = [f"{'':>8}  {'Small':>5}  {'Large':>5}  {'mg':>5}", "\u2500" * 28]
+    hdr = f"{'':>6} {'Sm':>2} {'Lg':>2} {'mg':>4}"
+    lines = [hdr, "\u2500" * 17]
     lines.append(
-        f"{'Actual':>8}  {actual.small:>5}  {actual.large:>5}  {actual.total_mg:>5}"
+        f"{'Actual':>6} {actual.small:>2} {actual.large:>2} {actual.total_mg:>4}"
     )
     if plan_day:
         lines.append(
-            f"{'Plan':>8}  {plan_day.small:>5}  "
-            f"{plan_day.large:>5}  {plan_day.total_mg:>5}"
+            f"{'Plan':>6} {plan_day.small:>2} "
+            f"{plan_day.large:>2} {plan_day.total_mg:>4}"
         )
         delta = actual.total_mg - plan_day.total_mg
         sign = "+" if delta > 0 else ""
-        lines.append("")
-        lines.append(f"{'Delta':>8}  {'':>5}  {'':>5}  {sign}{delta:>4}")
+        lines.append(f"{'Delta':>6} {'':>2} {'':>2} {sign}{delta:>3}")
 
     embed.description = _make_table(lines)
     return embed
@@ -140,24 +146,23 @@ def history_embed(
         color=discord.Color.purple(),
     )
     lines = [
-        f"{'Date':<10}  {'Plan':>5}  {'Actual':>6}  {'Delta':>5}",
-        "\u2500" * 31,
+        f"{'Date':<5} {'Plan':>4} {'Real':>4} {'Delta':>5}",
+        "\u2500" * 21,
     ]
 
     d = from_date
     while d <= to_date:
         plan = plan_days.get(d)
         actual = actuals.get(d)
-        plan_str = str(plan.total_mg) if plan else "\u00b7"
-        actual_str = str(actual.total_mg) if actual else "\u00b7"
+        p_str = str(plan.total_mg) if plan else "\u00b7"
+        a_str = str(actual.total_mg) if actual else "\u00b7"
         if plan and actual:
             delta = actual.total_mg - plan.total_mg
             sign = "+" if delta > 0 else ""
-            delta_str = f"{sign}{delta}"
+            d_str = f"{sign}{delta}"
         else:
-            delta_str = "\u00b7"
-        ds = d.strftime("%b %d")
-        lines.append(f"{ds:<10}  {plan_str:>5}  {actual_str:>6}  {delta_str:>5}")
+            d_str = "\u00b7"
+        lines.append(f"{_ds(d):<5} {p_str:>4} {a_str:>4} {d_str:>5}")
         d += timedelta(days=1)
 
     table = _make_table(lines)
