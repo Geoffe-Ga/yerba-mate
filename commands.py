@@ -159,8 +159,7 @@ class YerbaCog(commands.Cog):
                 skip_hold=True,
             )
             db.replace_plan_from_date(new_plan, from_date=tomorrow)
-            full_plan = db.get_all_plan_days()
-            embed = formatters.plan_embed(full_plan)
+            embed = formatters.plan_embed(new_plan)
             embed.title = "Plan Adjusted (replanned from actual)"
         else:
             # Keep existing trajectory, insert catch-up days
@@ -189,8 +188,7 @@ class YerbaCog(commands.Cog):
                     skip_hold=True,
                 )
                 db.replace_plan_from_date(new_plan, from_date=tomorrow)
-                full_plan = db.get_all_plan_days()
-                embed = formatters.plan_embed(full_plan)
+                embed = formatters.plan_embed(new_plan)
                 embed.title = "Plan Adjusted (actual already below plan)"
             else:
                 # Insert catch-up days at actual level, then shift remaining plan
@@ -224,9 +222,9 @@ class YerbaCog(commands.Cog):
                     for p in remaining
                 ]
 
-                db.replace_plan_from_date(new_entries + shifted, from_date=tomorrow)
-                full_plan = db.get_all_plan_days()
-                embed = formatters.plan_embed(full_plan)
+                combined = new_entries + shifted
+                db.replace_plan_from_date(combined, from_date=tomorrow)
+                embed = formatters.plan_embed(combined)
                 embed.title = "Plan Adjusted (catch-up days inserted)"
 
         await interaction.response.send_message(embed=embed)

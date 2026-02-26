@@ -53,7 +53,8 @@ def plan_embed(plan: list[PlanDay]) -> discord.Embed:
     for p in plan:
         drop = ""
         if prev_mg and prev_mg != p.total_mg:
-            drop = f"-{prev_mg - p.total_mg}"
+            diff = prev_mg - p.total_mg
+            drop = f"-{diff}" if diff > 0 else f"+{-diff}"
         prev_mg = p.total_mg
         lines.append(_row(p.date, p.small, p.large, p.total_mg, drop))
 
