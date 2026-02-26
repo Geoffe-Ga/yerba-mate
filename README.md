@@ -1,136 +1,89 @@
-# yerba-mate-reduction
+# Yerba Mate Reduction Bot
 
-Yerba Mate Reduction - A quality-controlled Python project generated with
-Start Green Stay Green.
+A Discord bot that generates a personalized caffeine tapering plan from yerba mate, tracks your actual consumption, and sends daily reminders to keep you on track.
 
-## Description
+## How It Works
 
-This project was generated with maximum quality standards from day one, including:
+The bot creates a step-down schedule that gradually reduces caffeine intake by swapping large drinks (150mg) for small ones (115mg), then reducing total count. Each level is held for 2 days to let your body adjust. Steps smaller than 35mg are merged to avoid imperceptible changes.
 
-- ✅ Comprehensive testing infrastructure (pytest with 90%+ coverage requirement)
-- ✅ Code quality tools (ruff, black, isort, mypy)
-- ✅ Security scanning (bandit, pip-audit)
-- ✅ Complexity analysis (radon, xenon)
-- ✅ Mutation testing (mutmut)
-- ✅ Pre-commit hooks (32 quality checks)
-- ✅ CI/CD pipeline (GitHub Actions)
-- ✅ AI-assisted development (Claude Code skills and subagents)
+**Example:** Starting from 3 large drinks (450mg), the plan tapers down over ~18 days:
 
-## Installation
+```
+2025-11-09  0S + 3L = 450mg
+2025-11-11  1S + 2L = 415mg  (-35mg)
+2025-11-13  2S + 1L = 380mg  (-35mg)
+2025-11-15  3S + 0L = 345mg  (-35mg)
+2025-11-17  0S + 2L = 300mg  (-45mg)
+...
+2025-11-25  1S + 0L = 115mg  (-35mg)
+```
+
+## Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/plan large:<int> small:<int>` | Generate a new tapering plan starting today |
+| `/log large:<int> small:<int> date:<optional>` | Record actual consumption (default: today) |
+| `/extra size:<large\|small>` | Add one extra drink to today's log |
+| `/adjust keep:<optional bool>` | Recalculate plan based on most recent actual |
+| `/status` | Show today's planned vs actual consumption |
+| `/history weeks:<optional int>` | Show plan vs actual for past N weeks |
+
+### `/adjust` modes
+
+- **Default (`keep=False`):** Replans from your most recent actual consumption, generating a new tapering schedule starting tomorrow.
+- **`keep=True`:** Keeps the existing plan trajectory and inserts catch-up days at your actual level to bridge back to the original schedule.
+
+## Setup
+
+### 1. Create a Discord Bot
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application and add a bot
+3. Enable the `applications.commands` scope
+4. Invite the bot to your server
+
+### 2. Configure Environment
+
+Create a `.env` file in the project root:
+
+```
+DISCORD_TOKEN=your-bot-token
+PING_CHANNEL_ID=your-channel-id
+```
+
+`PING_CHANNEL_ID` is the channel where the bot sends daily 6am PST reminders.
+
+### 3. Install and Run
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd yerba-mate-reduction
-
-# Install dependencies
-pip install -r requirements-dev.txt
-
-# Install pre-commit hooks
-pre-commit install
+pip install -r requirements.txt
+python bot.py
 ```
 
-## Usage
-
-Run the Hello World application:
-
-```bash
-python -m yerba_mate_reduction.main
-```
-
-Expected output:
-```
-Hello from yerba-mate-reduction!
-```
-
-## Development
-
-### Running Quality Checks
-
-```bash
-# Run all quality checks (recommended before commit)
-pre-commit run --all-files
-
-# Or run individual checks:
-./scripts/test.sh          # Run tests with coverage
-./scripts/lint.sh          # Run linting
-./scripts/format.sh --fix  # Auto-format code
-./scripts/typecheck.sh     # Run type checking
-./scripts/check-all.sh     # Run all checks
-```
-
-### Quality Tools
-
-This project includes:
-
-- **pytest**: Testing framework with 90%+ coverage requirement
-- **ruff**: Fast Python linter (replaces flake8, isort, and more)
-- **black**: Code formatter
-- **isort**: Import sorting
-- **mypy**: Static type checker
-- **bandit**: Security linter
-- **pip-audit**: Dependency vulnerability scanner
-- **radon/xenon**: Code complexity analysis (≤10 cyclomatic complexity)
-- **mutmut**: Mutation testing (≥80% mutation score recommended)
-- **pre-commit**: Git hooks framework (32 quality checks)
-
-### Project Structure
+## Project Structure
 
 ```
-yerba-mate-reduction/
-├── yerba_mate_reduction/     # Main package
-│   ├── __init__.py
-│   └── main.py
-├── tests/                # Test suite
-│   ├── __init__.py
-│   └── test_main.py
-├── scripts/              # Quality control scripts
-│   ├── check-all.sh
-│   ├── test.sh
-│   ├── lint.sh
-│   ├── format.sh
-│   ├── typecheck.sh
-│   ├── coverage.sh
-│   ├── security.sh
-│   ├── complexity.sh
-│   └── mutation.sh
-├── .github/workflows/    # CI/CD pipelines
-├── .claude/              # AI subagents and skills
-├── requirements.txt      # Runtime dependencies
-├── requirements-dev.txt  # Development dependencies
-├── pyproject.toml        # Tool configurations
-└── .pre-commit-config.yaml  # Pre-commit hooks
+├── main.py           # Original standalone script
+├── bot.py            # Bot entry point — setup, scheduler, run
+├── planner.py        # Pure-function reduction algorithm
+├── db.py             # SQLite persistence (yerba_mate.db)
+├── commands.py       # Discord slash command cog
+├── formatters.py     # Embed formatting helpers
+├── requirements.txt  # discord.py, APScheduler, python-dotenv
+└── .env              # DISCORD_TOKEN, PING_CHANNEL_ID
 ```
 
-### Testing
+## Daily Reminder
 
-```bash
-# Run tests
-./scripts/test.sh
+The bot sends an embed to your configured channel every day at 6:00 AM Pacific with your target consumption for that day. If no plan exists, it prompts you to create one.
 
-# Run tests with coverage report
-./scripts/coverage.sh
+## Dependencies
 
-# Run tests with HTML coverage report
-./scripts/coverage.sh --html
-# View htmlcov/index.html in browser
-```
-
-### Code Quality
-
-This project maintains MAXIMUM QUALITY standards:
-
-- **Test Coverage**: ≥90% required
-- **Cyclomatic Complexity**: ≤10 per function
-- **Mutation Score**: ≥80% recommended (periodic check)
-- **All Linters**: Must pass with zero violations
-- **Type Coverage**: 100% type hints
+- [discord.py](https://github.com/Rapptz/discord.py) — Discord API wrapper
+- [APScheduler](https://github.com/agronholm/apscheduler) — Scheduled daily pings
+- [python-dotenv](https://github.com/theskumar/python-dotenv) — Environment variable loading
 
 ## License
 
-MIT License
-
-## Attribution
-
-Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
-- Maximum quality Python projects from day one.
+MIT
