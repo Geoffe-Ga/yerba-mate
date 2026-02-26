@@ -10,78 +10,92 @@ import discord
 if TYPE_CHECKING:
     from planner import PlanDay
 
+# Shared column layout used by plan, history, and status tables.
+# Date(10) + Small(7) + Large(7) + mg(6) + Drop(6) = 40 chars
+_HDR = f"{'Date':<10}  {'Small':>5}  {'Large':>5}  {'mg':>5}  {'Drop':>5}"
+_SEP = "\u2500" * 40
+
+
+def _format_drinks(small: int, large: int) -> str:
+    """Format drink counts as readable text."""
+    parts = []
+    if small:
+        parts.append(f"{small} small")
+    if large:
+        parts.append(f"{large} large")
+    return ", ".join(parts) if parts else "none"
+
+
+def _row(d: date, small: int, large: int, mg: int, drop: str = "") -> str:
+    """Format one row in the standard table layout."""
+    ds = d.strftime("%b %d")
+    return f"{ds:<10}  {small:>5}  {large:>5}  {mg:>5}  {drop:>5}"
+
+
+def _make_table(lines: list[str]) -> str:
+    """Wrap lines in a Discord code block."""
+    return "```\n" + "\n".join(lines) + "\n```"
+
 
 def plan_embed(plan: list[PlanDay]) -> discord.Embed:
-    """Format the full tapering plan as an embed."""
+    """Format the full tapering plan as a one-row-per-day table."""
     embed = discord.Embed(
         title="Yerba Mate Reduction Plan",
         color=discord.Color.green(),
     )
-    lines = []
-    for p in plan:
-        lines.append(f"`{p.date}` — {p.small}S + {p.large}L = **{p.total_mg} mg**")
 
-    # Discord embed field value limit is 1024 chars; split if needed
-    chunk = "\n".join(lines)
-    if len(chunk) <= 1024:
-        embed.add_field(name="Schedule", value=chunk, inline=False)
-    else:
-        # Split into multiple fields
-        current: list[str] = []
-        current_len = 0
-        part = 1
-        for line in lines:
-            if current_len + len(line) + 1 > 1024:
-                embed.add_field(
-                    name=f"Schedule (part {part})",
-                    value="\n".join(current),
-                    inline=False,
-                )
-                current = []
-                current_len = 0
-                part += 1
-            current.append(line)
-            current_len += len(line) + 1
-        if current:
-            embed.add_field(
-                name=f"Schedule (part {part})", value="\n".join(current), inline=False
-            )
+    lines = [_HDR, _SEP]
+    prev_mg = 0
+    for p in plan:
+        drop = ""
+        if prev_mg and prev_mg != p.total_mg:
+            drop = f"-{prev_mg - p.total_mg}"
+        prev_mg = p.total_mg
+        lines.append(_row(p.date, p.small, p.large, p.total_mg, drop))
+
+    table = _make_table(lines)
 
     start = plan[0].date
     end = plan[-1].date
-    embed.set_footer(text=f"{len(plan)} days — {start} to {end}")
+    embed.description = table
+    embed.set_footer(text=f"{len(plan)} days \u2014 {start} to {end}")
     return embed
 
 
 def status_embed(
     plan_day: PlanDay | None, actual: PlanDay | None, today: date
 ) -> discord.Embed:
-    """Format today's status: plan vs actual."""
-    embed = discord.Embed(title=f"Status for {today}", color=discord.Color.blue())
+    """Format today's status as a compact table."""
+    embed = discord.Embed(
+        title=f"Status \u2014 {today.strftime('%b %d, %Y')}",
+        color=discord.Color.blue(),
+    )
+
+    lines = [f"{'':>8}  {'Small':>5}  {'Large':>5}  {'mg':>5}", "\u2500" * 28]
 
     if plan_day:
-        embed.add_field(
-            name="Plan",
-            value=f"{plan_day.small}S + {plan_day.large}L = {plan_day.total_mg} mg",
-            inline=True,
+        lines.append(
+            f"{'Plan':>8}  {plan_day.small:>5}  "
+            f"{plan_day.large:>5}  {plan_day.total_mg:>5}"
         )
     else:
-        embed.add_field(name="Plan", value="No plan for today", inline=True)
+        lines.append(f"{'Plan':>8}{'(no plan)':>20}")
 
     if actual:
-        embed.add_field(
-            name="Actual",
-            value=f"{actual.small}S + {actual.large}L = {actual.total_mg} mg",
-            inline=True,
+        lines.append(
+            f"{'Actual':>8}  {actual.small:>5}  "
+            f"{actual.large:>5}  {actual.total_mg:>5}"
         )
     else:
-        embed.add_field(name="Actual", value="Not logged yet", inline=True)
+        lines.append(f"{'Actual':>8}{'(not logged)':>20}")
 
     if plan_day and actual:
         delta = actual.total_mg - plan_day.total_mg
         sign = "+" if delta > 0 else ""
-        embed.add_field(name="Delta", value=f"{sign}{delta} mg", inline=True)
+        lines.append("")
+        lines.append(f"{'Delta':>8}  {'':>5}  {'':>5}  {sign}{delta:>4}")
 
+    embed.description = _make_table(lines)
     return embed
 
 
@@ -89,21 +103,29 @@ def log_confirmation_embed(
     actual: PlanDay, plan_day: PlanDay | None, replaced: bool
 ) -> discord.Embed:
     """Confirmation embed after logging consumption."""
+    title = f"Logged \u2014 {actual.date.strftime('%b %d, %Y')}"
+    if replaced:
+        title += " (updated)"
     embed = discord.Embed(
-        title=f"Logged for {actual.date}",
+        title=title,
         color=discord.Color.gold() if replaced else discord.Color.green(),
     )
-    embed.add_field(
-        name="Actual",
-        value=f"{actual.small}S + {actual.large}L = {actual.total_mg} mg",
-        inline=True,
+
+    lines = [f"{'':>8}  {'Small':>5}  {'Large':>5}  {'mg':>5}", "\u2500" * 28]
+    lines.append(
+        f"{'Actual':>8}  {actual.small:>5}  " f"{actual.large:>5}  {actual.total_mg:>5}"
     )
     if plan_day:
+        lines.append(
+            f"{'Plan':>8}  {plan_day.small:>5}  "
+            f"{plan_day.large:>5}  {plan_day.total_mg:>5}"
+        )
         delta = actual.total_mg - plan_day.total_mg
         sign = "+" if delta > 0 else ""
-        embed.add_field(name="vs Plan", value=f"{sign}{delta} mg", inline=True)
-    if replaced:
-        embed.set_footer(text="(replaced previous entry)")
+        lines.append("")
+        lines.append(f"{'Delta':>8}  {'':>5}  {'':>5}  {sign}{delta:>4}")
+
+    embed.description = _make_table(lines)
     return embed
 
 
@@ -113,38 +135,37 @@ def history_embed(
     from_date: date,
     to_date: date,
 ) -> discord.Embed:
-    """Format history table of plan vs actual."""
+    """Format history table of plan vs actual, one row per day."""
     embed = discord.Embed(
-        title=f"History: {from_date} to {to_date}",
+        title=f"History \u2014 {from_date} to {to_date}",
         color=discord.Color.purple(),
     )
-    lines = ["```"]
-    lines.append(f"{'Date':<12} {'Plan':>7} {'Actual':>7} {'Delta':>7}")
-    lines.append("-" * 36)
+    lines = [
+        f"{'Date':<10}  {'Plan':>5}  {'Actual':>6}  {'Delta':>5}",
+        "\u2500" * 31,
+    ]
 
     d = from_date
     while d <= to_date:
         plan = plan_days.get(d)
         actual = actuals.get(d)
-        plan_str = f"{plan.total_mg}" if plan else "-"
-        actual_str = f"{actual.total_mg}" if actual else "-"
+        plan_str = str(plan.total_mg) if plan else "\u00b7"
+        actual_str = str(actual.total_mg) if actual else "\u00b7"
         if plan and actual:
             delta = actual.total_mg - plan.total_mg
             sign = "+" if delta > 0 else ""
             delta_str = f"{sign}{delta}"
         else:
-            delta_str = "-"
-        lines.append(f"{d!s:<12} {plan_str:>7} {actual_str:>7} {delta_str:>7}")
+            delta_str = "\u00b7"
+        ds = d.strftime("%b %d")
+        lines.append(f"{ds:<10}  {plan_str:>5}  {actual_str:>6}  {delta_str:>5}")
         d += timedelta(days=1)
 
-    lines.append("```")
-    chunk = "\n".join(lines)
-
-    # Split if too long for embed field
-    if len(chunk) <= 1024:
-        embed.add_field(name="Daily Breakdown", value=chunk, inline=False)
+    table = _make_table(lines)
+    if len(table) <= 4096:
+        embed.description = table
     else:
-        embed.description = chunk[:4096]
+        embed.description = table[:4093] + "```"
 
     return embed
 
@@ -152,18 +173,15 @@ def history_embed(
 def daily_ping_embed(plan_day: PlanDay | None, today: date) -> discord.Embed:
     """Format the daily reminder ping."""
     if plan_day:
+        drinks = _format_drinks(plan_day.small, plan_day.large)
         embed = discord.Embed(
-            title=f"Today's Target — {today}",
-            description=(
-                f"**{plan_day.small}** small + "
-                f"**{plan_day.large}** large = "
-                f"**{plan_day.total_mg} mg**"
-            ),
+            title=f"Today's Target \u2014 {today.strftime('%b %d')}",
+            description=f"**{drinks}** \u2014 **{plan_day.total_mg} mg**",
             color=discord.Color.teal(),
         )
     else:
         embed = discord.Embed(
-            title=f"No Plan for {today}",
+            title=f"No Plan for {today.strftime('%b %d')}",
             description="Use `/plan` to create a reduction plan.",
             color=discord.Color.light_grey(),
         )
