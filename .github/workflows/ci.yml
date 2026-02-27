@@ -157,6 +157,7 @@ jobs:
 
       - name: Comment coverage on PR
         if: github.event_name == 'pull_request' && matrix.python-version == env.PYTHON_VERSION_DEFAULT
+        continue-on-error: true
         uses: py-cov-action/python-coverage-comment-action@v3
         with:
           GITHUB_TOKEN: ${{ github.token }}
