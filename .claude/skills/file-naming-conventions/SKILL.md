@@ -35,8 +35,8 @@ Always prefix dated documents with ISO 8601 format (YYYY-MM-DD) for natural chro
 
 **Multiple documents same day**: Use descriptive disambiguation:
 ```
-2026-01-26_MUTATION_ANALYSIS_CLI.md
-2026-01-26_MUTATION_ANALYSIS_CREDENTIALS.md
+2026-01-26_PERFORMANCE_ANALYSIS_CLI.md
+2026-01-26_PERFORMANCE_ANALYSIS_CREDENTIALS.md
 ```
 
 **Versioned documents**: `YYYY-MM-DD_DOCUMENT_NAME_vX.Y.md`
@@ -47,14 +47,14 @@ Always prefix dated documents with ISO 8601 format (YYYY-MM-DD) for natural chro
 
 ### Example 1: Plan File
 ```
-2026-01-26_MUTANT_EXTERMINATION_PLAN_CLI.md
-2026-01-25_MUTATION_TESTING_STATUS.md
+2026-01-26_DEPLOYMENT_PLAN_CLI.md
+2026-01-25_TESTING_COVERAGE_STATUS.md
 2026-01-20_FEATURE_IMPLEMENTATION_STRATEGY.md
 ```
 
 ### Example 2: Analysis Reports
 ```
-2026-01-26_mutation_analysis_cli.md
+2026-01-26_performance_analysis_cli.md
 2026-01-25_performance_analysis_database.md
 2026-01-20_security_audit_report.md
 ```

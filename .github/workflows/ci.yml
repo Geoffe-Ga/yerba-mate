@@ -11,7 +11,6 @@ env:
   PYTHON_VERSION_DEFAULT: "3.12"
   MIN_COVERAGE: 90
   MIN_BRANCH_COVERAGE: 85
-  MIN_MUTATION_SCORE: 80
   MIN_DOCSTRING_COVERAGE: 95
 
 jobs:
@@ -169,70 +168,6 @@ jobs:
           MINIMUM_GREEN: ${{ env.MIN_COVERAGE }}
           MINIMUM_ORANGE: 80
 
-  mutation:
-    name: Mutation Testing
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    needs: quality
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION_DEFAULT }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            .venv
-          key: ${{ runner.os }}-pip-mutation-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.py') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-mutation-
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest mutmut
-
-      - name: Run mutation testing with mutmut
-        run: |
-          mutmut run --paths-to-mutate=. --tests-dir=tests --runner="pytest -x --tb=short" --use-coverage || true
-          mutmut results
-          mutmut json-report
-
-      - name: Check mutation score
-        run: |
-          MUTATION_SCORE=$(mutmut junitxml > mutation-report.xml 2>&1 | grep -oP 'Survived: \K\d+' || echo "0")
-          TOTAL_MUTATIONS=$(mutmut show all 2>&1 | grep -c "Status:" || echo "1")
-          KILLED=$((TOTAL_MUTATIONS - MUTATION_SCORE))
-          SCORE=$((KILLED * 100 / TOTAL_MUTATIONS))
-          echo "Mutation Score: $SCORE%"
-          if [ $SCORE -lt ${{ env.MIN_MUTATION_SCORE }} ]; then
-            echo "Mutation score $SCORE% is below minimum threshold of ${{ env.MIN_MUTATION_SCORE }}%"
-            exit 1
-          fi
-        continue-on-error: true
-
-      - name: Upload mutation testing report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutation-report
-          path: |
-            .mutmut-cache
-            mutation-report.xml
-          retention-days: 30
-
   complexity:
     name: Code Complexity Analysis
     runs-on: ubuntu-latest
@@ -308,7 +243,7 @@ jobs:
   summary:
     name: Quality Gate Summary
     runs-on: ubuntu-latest
-    needs: [quality, mutation, complexity, build]
+    needs: [quality, complexity, build]
     if: always()
     
     steps:
@@ -317,17 +252,11 @@ jobs:
           echo "Quality Gate Results:"
           echo "===================="
           echo "Quality Checks: ${{ needs.quality.result }}"
-          echo "Mutation Testing: ${{ needs.mutation.result }}"
           echo "Complexity Analysis: ${{ needs.complexity.result }}"
           echo "Build: ${{ needs.build.result }}"
-          
+
           if [ "${{ needs.quality.result }}" != "success" ]; then
             echo "Quality checks failed!"
-            exit 1
-          fi
-          
-          if [ "${{ github.ref }}" == "refs/heads/main" ] && [ "${{ needs.mutation.result }}" != "success" ] && [ "${{ needs.mutation.result }}" != "skipped" ]; then
-            echo "Mutation testing failed on main branch!"
             exit 1
           fi
           

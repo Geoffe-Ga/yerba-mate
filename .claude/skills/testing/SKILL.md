@@ -5,7 +5,7 @@ description: >-
   Use when writing unit tests, integration tests, setting up fixtures,
   mocking dependencies, or improving test coverage. Covers Python (pytest),
   TypeScript (Jest), Go (testing), and Rust (built-in + proptest).
-  Do NOT use for mutation testing specifics (use mutation-testing skill).
+  Do NOT use for general code quality guidance (use vibe or stay-green skills).
 metadata:
   author: Geoff
   version: 1.0.0
