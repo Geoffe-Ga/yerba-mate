@@ -50,7 +50,6 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install pytest pytest-cov pytest-xdist pytest-timeout
           pip install ruff pylint mypy bandit pip-audit
-          pip install coverage-badge
 
       - name: Run Ruff linter
         run: |
@@ -120,12 +119,6 @@ jobs:
           coverage report --fail-under=${{ env.MIN_BRANCH_COVERAGE }}
         continue-on-error: false
 
-      - name: Generate coverage badge
-        if: matrix.python-version == env.PYTHON_VERSION_DEFAULT
-        continue-on-error: true
-        run: |
-          coverage-badge -o coverage-badge.svg -f
-
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -134,7 +127,6 @@ jobs:
           path: |
             coverage.xml
             htmlcov/
-            coverage-badge.svg
           retention-days: 30
 
       - name: Upload test results

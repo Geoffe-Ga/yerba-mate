@@ -76,6 +76,7 @@ python_functions = ["test_*"]
 [tool.coverage.run]
 source = ["yerba_mate_reduction"]
 branch = true
+relative_files = true
 omit = [
     "*/tests/*",
     "*/test_*.py",
