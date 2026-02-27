@@ -122,6 +122,7 @@ jobs:
 
       - name: Generate coverage badge
         if: matrix.python-version == env.PYTHON_VERSION_DEFAULT
+        continue-on-error: true
         run: |
           coverage-badge -o coverage-badge.svg -f
 
