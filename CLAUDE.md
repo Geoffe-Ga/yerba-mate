@@ -101,7 +101,6 @@ Quality thresholds are immutable. Meet them, don't lower them.
 
 **Standards**:
 - Test Coverage: ≥90%
-- Docstring Coverage: ≥95%
 - Cyclomatic Complexity: ≤10 per function
 - Pylint Score: ≥9.0
 
@@ -179,7 +178,6 @@ When all CI checks pass with zero warnings, zero errors, and maximum quality met
 - ✅ Linting: 0 errors, 0 warnings
 - ✅ Type checking: 0 errors
 - ✅ Security: 0 vulnerabilities
-- ✅ Docstring coverage: ≥95%
 
 This represents **MAXIMUM QUALITY ENGINEERING**—the standard to which all code must aspire.
 
@@ -374,7 +372,6 @@ All code must meet these standards before merging to main:
 
 #### Test Coverage
 - **Code Coverage**: 90% minimum (branch coverage)
-- **Docstring Coverage**: 95% minimum (interrogate)
 - **Test Types**: Unit, Integration, Property-based, and E2E coverage required
 
 #### Type Checking

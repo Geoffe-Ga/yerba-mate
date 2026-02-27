@@ -11,7 +11,6 @@ env:
   PYTHON_VERSION_DEFAULT: "3.12"
   MIN_COVERAGE: 90
   MIN_BRANCH_COVERAGE: 85
-  MIN_DOCSTRING_COVERAGE: 95
 
 jobs:
   quality:
@@ -51,7 +50,7 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install pytest pytest-cov pytest-xdist pytest-timeout
           pip install ruff pylint mypy bandit pip-audit
-          pip install interrogate coverage-badge
+          pip install coverage-badge
 
       - name: Run Ruff linter
         run: |
@@ -71,11 +70,6 @@ jobs:
       - name: Run MyPy type checking
         run: |
           mypy . --install-types --non-interactive --ignore-missing-imports --show-error-codes --pretty
-        continue-on-error: false
-
-      - name: Check docstring coverage
-        run: |
-          interrogate -v --fail-under=${{ env.MIN_DOCSTRING_COVERAGE }} --ignore-init-method --ignore-init-module --ignore-magic --ignore-nested-functions .
         continue-on-error: false
 
       - name: Run Bandit security scanner

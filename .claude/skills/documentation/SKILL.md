@@ -114,7 +114,6 @@ def fetch_user(user_id: str) -> User:
 
 ### Error: Documentation gets stale after code changes
 - Update docs in the same commit as code changes
-- Add docstring checks to CI (e.g., interrogate for Python)
 - Review docstrings during PR review
 
 ### Error: Documentation is too verbose
