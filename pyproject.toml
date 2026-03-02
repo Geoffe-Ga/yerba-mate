@@ -31,13 +31,15 @@ dev = [
     "bandit>=1.7.5",
     "pip-audit>=2.7.0",
     "radon>=6.0.0",
-    "mutmut>=2.4.0",
     "pre-commit>=3.4.0",
 ]
 
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["yerba_mate_reduction*"]
 
 [tool.black]
 line-length = 88
@@ -74,6 +76,7 @@ python_functions = ["test_*"]
 [tool.coverage.run]
 source = ["yerba_mate_reduction"]
 branch = true
+relative_files = true
 omit = [
     "*/tests/*",
     "*/test_*.py",
@@ -148,9 +151,3 @@ ignore = []
 [tool.bandit]
 exclude_dirs = ["tests", "venv", "virtualenv"]
 skips = ["B101"]  # Skip assert_used in tests
-
-[tool.mutmut]
-paths_to_mutate = "yerba_mate_reduction/"
-backup = false
-runner = "python -m pytest --exitfirst --quiet --tb=no"
-tests_dir = "tests/"

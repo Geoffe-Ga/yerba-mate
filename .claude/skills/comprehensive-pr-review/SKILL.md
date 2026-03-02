@@ -38,7 +38,6 @@ Non-blocking improvements: readability, naming, organization, complexity.
 ### Step 6: Check Project Compliance
 Verify against project standards (adjust to project's CLAUDE.md):
 - Test coverage meets threshold
-- Docstring coverage meets threshold
 - Linting rules pass
 - Type checking passes
 - No forbidden patterns

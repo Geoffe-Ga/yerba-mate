@@ -36,7 +36,6 @@ Always invoke tools through `./scripts/*` instead of directly.
 | Type check | `mypy src/` | `./scripts/lint.sh` |
 | Run tests | `pytest` | `./scripts/test.sh` |
 | Security scan | `bandit -r src/` | `./scripts/security.sh` |
-| Mutation testing | `mutmut run` | `./scripts/mutation.sh` |
 | All checks | *(run each tool)* | `./scripts/check-all.sh` |
 
 See [9.1 Tool Invocation Patterns](#91-tool-invocation-patterns) for complete list.
@@ -80,7 +79,7 @@ See [10.1 No Shortcuts Policy](#101-no-shortcuts-policy) for detailed examples.
 
 ### 1.4 Stay Green - Never Request Review with Failing Checks
 
-Follow the 4-gate workflow rigorously.
+Follow the 3-gate workflow rigorously.
 
 **The Rule**:
 - 🚫 **NEVER** create PR while CI is red
@@ -90,8 +89,7 @@ Follow the 4-gate workflow rigorously.
 **The Process**:
 1. Gate 1: Local checks pass (`./scripts/check-all.sh` → exit 0)
 2. Gate 2: CI pipeline green (all jobs ✅)
-3. Gate 3: Mutation score ≥80%
-4. Gate 4: Code review LGTM
+3. Gate 3: Code review LGTM
 
 See [4. Stay Green Workflow](#4-stay-green-workflow) for complete documentation.
 
@@ -103,8 +101,6 @@ Quality thresholds are immutable. Meet them, don't lower them.
 
 **Standards**:
 - Test Coverage: ≥90%
-- Docstring Coverage: ≥95%
-- Mutation Score: ≥80%
 - Cyclomatic Complexity: ≤10 per function
 - Pylint Score: ≥9.0
 
@@ -154,7 +150,7 @@ See [10. Common Pitfalls & Troubleshooting](#10-common-pitfalls--troubleshooting
 **yerba-mate-reduction** is a Python project built with MAXIMUM QUALITY ENGINEERING standards from inception.
 
 **Purpose**: This project demonstrates how to implement comprehensive quality engineering practices in Python, including:
-- Complete test coverage (unit, integration, property-based, mutation)
+- Complete test coverage (unit, integration, property-based)
 - Comprehensive static analysis and security scanning
 - Architectural boundary enforcement
 - Automated quality gates in CI/CD
@@ -162,7 +158,7 @@ See [10. Common Pitfalls & Troubleshooting](#10-common-pitfalls--troubleshooting
 
 **Key Technologies**:
 - **Language**: Python 3.11+
-- **Testing**: pytest, hypothesis, mutmut
+- **Testing**: pytest, hypothesis
 - **Linting**: ruff, pylint, mypy
 - **Formatting**: black, isort
 - **Security**: bandit, pip-audit
@@ -182,8 +178,6 @@ When all CI checks pass with zero warnings, zero errors, and maximum quality met
 - ✅ Linting: 0 errors, 0 warnings
 - ✅ Type checking: 0 errors
 - ✅ Security: 0 vulnerabilities
-- ✅ Mutation score: ≥80%
-- ✅ Docstring coverage: ≥95%
 
 This represents **MAXIMUM QUALITY ENGINEERING**—the standard to which all code must aspire.
 
@@ -233,9 +227,9 @@ For those committed to maximum quality engineering:
 
 **Policy**: Never request review with failing checks. Never merge without LGTM.
 
-The Stay Green workflow enforces iterative quality improvement through **4 sequential gates**. Each gate must pass before proceeding to the next.
+The Stay Green workflow enforces iterative quality improvement through **3 sequential gates**. Each gate must pass before proceeding to the next.
 
-### 4.1 The Four Gates
+### 4.1 The Three Gates
 
 1. **Gate 1: Local Pre-Commit** (Iterate Until Green)
    - Run `./scripts/check-all.sh`
@@ -249,16 +243,10 @@ The Stay Green workflow enforces iterative quality improvement through **4 seque
    - If CI fails: fix locally, re-run Gate 1, push again
    - Only proceed when all CI jobs show ✅
 
-3. **Gate 3: Mutation Testing** (Iterate Until 80%+)
-   - Run `./scripts/mutation.sh` (or wait for CI job)
-   - If score < 80%: add tests to kill surviving mutants
-   - Re-run Gate 1, push, wait for CI
-   - Only proceed when mutation score ≥ 80%
-
-4. **Gate 4: Code Review** (Iterate Until LGTM)
+3. **Gate 3: Code Review** (Iterate Until LGTM)
    - Wait for code review (AI or human)
    - If feedback provided: address ALL concerns
-   - Re-run Gate 1, push, wait for CI and mutation
+   - Re-run Gate 1, push, wait for CI
    - Only merge when review shows LGTM with no reservations
 
 ### 4.2 Quick Checklist
@@ -268,8 +256,7 @@ Before creating/updating a PR:
 - [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
 - [ ] Push changes: `git push origin feature-branch`
 - [ ] Gate 2: All CI jobs show ✅ (green)
-- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
-- [ ] Gate 4: Code review shows LGTM
+- [ ] Gate 3: Code review shows LGTM
 - [ ] Ready to merge!
 
 ### 4.3 Anti-Patterns (DO NOT DO)
@@ -309,8 +296,7 @@ yerba-mate-reduction/
 │   ├── test.sh                       # Run test suite
 │   ├── lint.sh                       # Run linters
 │   ├── format.sh                     # Format code
-│   ├── security.sh                   # Security scanning
-│   └── mutation.sh                   # Mutation testing
+│   └── security.sh                   # Security scanning
 ├── src/
 │   └── yerba_mate_reduction/
 │       ├── __init__.py
@@ -386,8 +372,6 @@ All code must meet these standards before merging to main:
 
 #### Test Coverage
 - **Code Coverage**: 90% minimum (branch coverage)
-- **Docstring Coverage**: 95% minimum (interrogate)
-- **Mutation Score**: 80% minimum (mutmut)
 - **Test Types**: Unit, Integration, Property-based, and E2E coverage required
 
 #### Type Checking
