@@ -135,10 +135,24 @@ class YerbaCog(commands.Cog):
         description="Recalculate plan based on most recent actual consumption",
     )
     @app_commands.describe(
-        keep="Keep existing trajectory and insert catch-up days instead of replanning"
+        strategy="How to adjust: replan from scratch or catch up to existing plan"
+    )
+    @app_commands.choices(
+        strategy=[
+            app_commands.Choice(
+                name="Replan — new reduction schedule from current level",
+                value="replan",
+            ),
+            app_commands.Choice(
+                name="Catch up — hold at current level then rejoin existing plan",
+                value="catchup",
+            ),
+        ]
     )
     async def adjust(
-        self, interaction: discord.Interaction, keep: bool = False
+        self,
+        interaction: discord.Interaction,
+        strategy: str = "replan",
     ) -> None:
         """Adjust the plan based on actual consumption."""
         recent = db.get_most_recent_actual()
@@ -150,7 +164,7 @@ class YerbaCog(commands.Cog):
 
         tomorrow = date.today() + timedelta(days=1)
 
-        if not keep:
+        if strategy == "replan":
             # Regenerate plan reducing immediately from actual level
             new_plan = generate_plan(
                 small=recent.small,
