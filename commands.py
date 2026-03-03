@@ -99,17 +99,12 @@ class YerbaCog(commands.Cog):
         ]
     )
     async def extra(self, interaction: discord.Interaction, size: str) -> None:
-        """Add one extra drink to today's log. Copies plan if no actual exists."""
+        """Add one extra drink to today's log."""
         today = date.today()
         actual = db.get_actual(today)
 
         if actual is None:
-            # Copy from plan, or start at 0
-            plan_day = db.get_plan_day(today)
-            if plan_day:
-                sm, lg = plan_day.small, plan_day.large
-            else:
-                sm, lg = 0, 0
+            sm, lg = 0, 0
         else:
             sm, lg = actual.small, actual.large
 
