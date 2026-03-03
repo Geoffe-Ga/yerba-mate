@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -71,15 +71,15 @@ if "discord" not in sys.modules:
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TESTS_DIR = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
+from helpers import make_plan_day as make_plan_day  # noqa: E402
 
 import db  # noqa: E402
-from planner import LARGE_MG, SMALL_MG, PlanDay  # noqa: E402
-
-if TYPE_CHECKING:
-    from datetime import date
-
 
 # ---------------------------------------------------------------------------
 # Database fixtures
@@ -115,23 +115,3 @@ def cog() -> Any:
 
     bot = MagicMock()
     return YerbaCog(bot)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def make_plan_day(
-    d: date,
-    *,
-    small: int = 0,
-    large: int = 0,
-) -> PlanDay:
-    """Create a ``PlanDay`` with auto-calculated ``total_mg``."""
-    return PlanDay(
-        date=d,
-        small=small,
-        large=large,
-        total_mg=(SMALL_MG * small) + (LARGE_MG * large),
-    )
