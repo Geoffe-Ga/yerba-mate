@@ -45,7 +45,11 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
 
 def save_plan(plan: list[PlanDay], db_path: Path = DB_PATH) -> None:
-    """Save a plan, preserving historical plan days before the start date."""
+    """Save a plan, preserving historical plan days before the start date.
+
+    The plan must be sorted by date ascending — ``plan[0].date`` is used
+    as the deletion boundary.
+    """
     if not plan:
         return
     start = str(plan[0].date)
