@@ -104,7 +104,7 @@ def mock_interaction() -> MagicMock:
 
 
 @pytest.fixture()
-def cog() -> MagicMock:
+def cog() -> Any:
     """Return a ``YerbaCog`` backed by a mock bot."""
     from commands import YerbaCog
 
