@@ -16,9 +16,14 @@ import pytest
 
 
 def _passthrough(**_kwargs: Any) -> Any:
-    """Decorator factory that returns the wrapped function unchanged."""
+    """Decorator factory that mimics discord.py's Command wrapper.
+
+    Sets ``fn.callback = fn`` so tests can use ``.callback()`` consistently
+    regardless of whether real discord.py decorators are present.
+    """
 
     def _decorator(fn: Any) -> Any:
+        fn.callback = fn
         return fn
 
     return _decorator
