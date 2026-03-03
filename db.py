@@ -45,9 +45,16 @@ def init_db(db_path: Path = DB_PATH) -> None:
 
 
 def save_plan(plan: list[PlanDay], db_path: Path = DB_PATH) -> None:
-    """Replace the entire plan with new days."""
+    """Save a plan, preserving historical plan days before the start date.
+
+    The plan must be sorted by date ascending — ``plan[0].date`` is used
+    as the deletion boundary.
+    """
+    if not plan:
+        return
+    start = str(plan[0].date)
     conn = get_connection(db_path)
-    conn.execute("DELETE FROM plan_days")
+    conn.execute("DELETE FROM plan_days WHERE date >= ?", (start,))
     conn.executemany(
         "INSERT INTO plan_days (date, small, large, total_mg) VALUES (?, ?, ?, ?)",
         [(str(p.date), p.small, p.large, p.total_mg) for p in plan],
