@@ -3,13 +3,68 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Add project root to sys.path so bare `import db` / `import commands` work.
+# ---------------------------------------------------------------------------
+# Stub discord if it is not installed in the test environment
+# ---------------------------------------------------------------------------
+
+
+def _passthrough(**_kwargs: Any) -> Any:
+    """Decorator factory that returns the wrapped function unchanged."""
+
+    def _decorator(fn: Any) -> Any:
+        return fn
+
+    return _decorator
+
+
+def _install_discord_stubs() -> None:
+    """Insert lightweight discord stubs so ``import commands`` works."""
+    discord = types.ModuleType("discord")
+    discord.Embed = MagicMock  # type: ignore[attr-defined]
+    discord.Color = MagicMock()  # type: ignore[attr-defined]
+    discord.Interaction = MagicMock  # type: ignore[attr-defined]
+    discord.Intents = MagicMock()  # type: ignore[attr-defined]
+    discord.TextChannel = MagicMock  # type: ignore[attr-defined]
+
+    app_commands = types.ModuleType("discord.app_commands")
+    app_commands.command = _passthrough  # type: ignore[attr-defined]
+    app_commands.describe = _passthrough  # type: ignore[attr-defined]
+    app_commands.choices = _passthrough  # type: ignore[attr-defined]
+    app_commands.Choice = MagicMock  # type: ignore[attr-defined]
+
+    ext = types.ModuleType("discord.ext")
+    ext_commands = types.ModuleType("discord.ext.commands")
+    ext_commands.Cog = type("Cog", (), {})  # type: ignore[attr-defined]
+    ext_commands.Bot = MagicMock  # type: ignore[attr-defined]
+    ext.commands = ext_commands  # type: ignore[attr-defined]
+
+    discord.app_commands = app_commands  # type: ignore[attr-defined]
+    discord.ext = ext  # type: ignore[attr-defined]
+
+    for name, mod in [
+        ("discord", discord),
+        ("discord.app_commands", app_commands),
+        ("discord.ext", ext),
+        ("discord.ext.commands", ext_commands),
+    ]:
+        sys.modules[name] = mod
+
+
+if "discord" not in sys.modules:
+    _install_discord_stubs()
+
+
+# ---------------------------------------------------------------------------
+# Project root on sys.path
+# ---------------------------------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
