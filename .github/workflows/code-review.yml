@@ -1,6 +1,6 @@
-name: Code Review
+name: Claude Code Review
 
-"on":
+on:
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -13,7 +13,6 @@ permissions:
 jobs:
   claude-review:
     runs-on: ubuntu-latest
-    if: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
 
     steps:
       - name: Checkout repository
