@@ -190,3 +190,52 @@ async def test_adjust_catchup_inserts_hold_days(
     assert combined[3].total_mg == 265
 
     mock_interaction.response.send_message.assert_awaited_once()
+
+
+@patch("commands.generate_plan")
+@patch("commands.formatters")
+@patch("commands.db")
+@patch("commands.date")
+@patch("commands.timedelta", wraps=timedelta)
+async def test_adjust_catchup_actual_below_plan_replans(
+    _mock_td: MagicMock,
+    mock_date: MagicMock,
+    mock_db: MagicMock,
+    mock_fmt: MagicMock,
+    mock_gen: MagicMock,
+    cog: Any,
+    mock_interaction: MagicMock,
+) -> None:
+    """Catchup with actual below entire plan falls back to replan."""
+    mock_date.today.return_value = FIXED_TODAY
+    # Actual is low — below all future plan days
+    recent = _recent(small=0, large=1)  # total_mg = 150
+
+    future_plan = [
+        PlanDay(date=TOMORROW, small=2, large=1, total_mg=380),
+        PlanDay(
+            date=TOMORROW + timedelta(days=1),
+            small=1,
+            large=1,
+            total_mg=265,
+        ),
+    ]
+
+    mock_db.get_most_recent_actual.return_value = recent
+    mock_db.get_plan_days_from.return_value = future_plan
+    mock_gen.return_value = [
+        PlanDay(date=TOMORROW, small=0, large=0, total_mg=0),
+    ]
+    mock_fmt.plan_embed.return_value = MagicMock()
+
+    await cog.adjust.callback(cog, mock_interaction, "catchup")
+
+    # Should fall back to generate_plan since actual < all plan days
+    mock_gen.assert_called_once_with(
+        small=recent.small,
+        large=recent.large,
+        start_date=TOMORROW,
+        skip_hold=True,
+    )
+    mock_db.replace_plan_from_date.assert_called_once()
+    mock_interaction.response.send_message.assert_awaited_once()
