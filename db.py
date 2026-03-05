@@ -1,42 +1,73 @@
-"""SQLite persistence for plan days and actual consumption."""
+"""PostgreSQL persistence for plan days and actual consumption."""
 
 from __future__ import annotations
 
-import sqlite3
-from datetime import date
-from pathlib import Path
+import os
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
 
 from planner import PlanDay
 
-DB_PATH = Path("yerba_mate.db")
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from datetime import date
+
+    import psycopg2
+
+_pool: SimpleConnectionPool | None = None
 
 
-def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    """Return a connection with row_factory set."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+def init_db(database_url: str | None = None) -> None:
+    """Create the connection pool and tables.
+
+    Args:
+        database_url: PostgreSQL DSN.  Falls back to the ``DATABASE_URL``
+            environment variable when *None*.
+    """
+    global _pool
+    dsn = database_url or os.environ["DATABASE_URL"]
+    _pool = SimpleConnectionPool(1, 10, dsn)
+
+    with _connection() as conn, conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS plan_days (
+                date DATE PRIMARY KEY,
+                small INTEGER NOT NULL,
+                large INTEGER NOT NULL,
+                total_mg INTEGER NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS actuals (
+                date DATE PRIMARY KEY,
+                small INTEGER NOT NULL,
+                large INTEGER NOT NULL,
+                total_mg INTEGER NOT NULL
+            )
+        """)
+        conn.commit()
 
 
-def init_db(db_path: Path = DB_PATH) -> None:
-    """Create tables if they don't exist."""
-    conn = get_connection(db_path)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS plan_days (
-            date TEXT PRIMARY KEY,
-            small INTEGER NOT NULL,
-            large INTEGER NOT NULL,
-            total_mg INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS actuals (
-            date TEXT PRIMARY KEY,
-            small INTEGER NOT NULL,
-            large INTEGER NOT NULL,
-            total_mg INTEGER NOT NULL
-        );
-    """)
-    conn.close()
+def close_db() -> None:
+    """Close the connection pool (useful for tests)."""
+    global _pool
+    if _pool is not None:
+        _pool.closeall()
+        _pool = None
+
+
+@contextmanager
+def _connection() -> Iterator[psycopg2.extensions.connection]:
+    """Get a connection from the pool, returning it on exit."""
+    assert _pool is not None, "Call init_db() before using the database"
+    conn = _pool.getconn()
+    try:
+        yield conn
+    finally:
+        _pool.putconn(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +75,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
 # ---------------------------------------------------------------------------
 
 
-def save_plan(plan: list[PlanDay], db_path: Path = DB_PATH) -> None:
+def save_plan(plan: list[PlanDay]) -> None:
     """Save a plan, preserving historical plan days before the start date.
 
     The plan must be sorted by date ascending — ``plan[0].date`` is used
@@ -52,54 +83,54 @@ def save_plan(plan: list[PlanDay], db_path: Path = DB_PATH) -> None:
     """
     if not plan:
         return
-    start = str(plan[0].date)
-    conn = get_connection(db_path)
-    conn.execute("DELETE FROM plan_days WHERE date >= ?", (start,))
-    conn.executemany(
-        "INSERT INTO plan_days (date, small, large, total_mg) VALUES (?, ?, ?, ?)",
-        [(str(p.date), p.small, p.large, p.total_mg) for p in plan],
-    )
-    conn.commit()
-    conn.close()
+    start = plan[0].date
+    with _connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM plan_days WHERE date >= %s", (start,))
+        for p in plan:
+            cur.execute(
+                "INSERT INTO plan_days (date, small, large, total_mg) "
+                "VALUES (%s, %s, %s, %s)",
+                (p.date, p.small, p.large, p.total_mg),
+            )
+        conn.commit()
 
 
-def replace_plan_from_date(
-    plan: list[PlanDay], from_date: date, db_path: Path = DB_PATH
-) -> None:
+def replace_plan_from_date(plan: list[PlanDay], from_date: date) -> None:
     """Delete plan days >= from_date and insert new ones."""
-    conn = get_connection(db_path)
-    conn.execute("DELETE FROM plan_days WHERE date >= ?", (str(from_date),))
-    conn.executemany(
-        "INSERT INTO plan_days (date, small, large, total_mg) VALUES (?, ?, ?, ?)",
-        [(str(p.date), p.small, p.large, p.total_mg) for p in plan],
-    )
-    conn.commit()
-    conn.close()
+    with _connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM plan_days WHERE date >= %s", (from_date,))
+        for p in plan:
+            cur.execute(
+                "INSERT INTO plan_days (date, small, large, total_mg) "
+                "VALUES (%s, %s, %s, %s)",
+                (p.date, p.small, p.large, p.total_mg),
+            )
+        conn.commit()
 
 
-def get_plan_day(d: date, db_path: Path = DB_PATH) -> PlanDay | None:
+def get_plan_day(d: date) -> PlanDay | None:
     """Get the plan for a specific date."""
-    conn = get_connection(db_path)
-    row = conn.execute("SELECT * FROM plan_days WHERE date = ?", (str(d),)).fetchone()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT * FROM plan_days WHERE date = %s", (d,))
+        row = cur.fetchone()
     if row is None:
         return None
     return PlanDay(
-        date=date.fromisoformat(row["date"]),
+        date=row["date"],
         small=row["small"],
         large=row["large"],
         total_mg=row["total_mg"],
     )
 
 
-def get_all_plan_days(db_path: Path = DB_PATH) -> list[PlanDay]:
+def get_all_plan_days() -> list[PlanDay]:
     """Get all plan days ordered by date."""
-    conn = get_connection(db_path)
-    rows = conn.execute("SELECT * FROM plan_days ORDER BY date").fetchall()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT * FROM plan_days ORDER BY date")
+        rows = cur.fetchall()
     return [
         PlanDay(
-            date=date.fromisoformat(r["date"]),
+            date=r["date"],
             small=r["small"],
             large=r["large"],
             total_mg=r["total_mg"],
@@ -108,16 +139,17 @@ def get_all_plan_days(db_path: Path = DB_PATH) -> list[PlanDay]:
     ]
 
 
-def get_plan_days_from(from_date: date, db_path: Path = DB_PATH) -> list[PlanDay]:
+def get_plan_days_from(from_date: date) -> list[PlanDay]:
     """Get plan days from a date onward."""
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        "SELECT * FROM plan_days WHERE date >= ? ORDER BY date", (str(from_date),)
-    ).fetchall()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM plan_days WHERE date >= %s ORDER BY date",
+            (from_date,),
+        )
+        rows = cur.fetchall()
     return [
         PlanDay(
-            date=date.fromisoformat(r["date"]),
+            date=r["date"],
             small=r["small"],
             large=r["large"],
             total_mg=r["total_mg"],
@@ -131,62 +163,62 @@ def get_plan_days_from(from_date: date, db_path: Path = DB_PATH) -> list[PlanDay
 # ---------------------------------------------------------------------------
 
 
-def upsert_actual(d: date, small: int, large: int, db_path: Path = DB_PATH) -> None:
-    """Insert or replace an actual consumption record."""
+def upsert_actual(d: date, small: int, large: int) -> None:
+    """Insert or update an actual consumption record."""
     total_mg = (115 * small) + (150 * large)
-    conn = get_connection(db_path)
-    conn.execute(
-        "INSERT OR REPLACE INTO actuals "
-        "(date, small, large, total_mg) VALUES (?, ?, ?, ?)",
-        (str(d), small, large, total_mg),
-    )
-    conn.commit()
-    conn.close()
+    with _connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO actuals (date, small, large, total_mg) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (date) DO UPDATE SET "
+            "small = EXCLUDED.small, large = EXCLUDED.large, "
+            "total_mg = EXCLUDED.total_mg",
+            (d, small, large, total_mg),
+        )
+        conn.commit()
 
 
-def get_actual(d: date, db_path: Path = DB_PATH) -> PlanDay | None:
+def get_actual(d: date) -> PlanDay | None:
     """Get actual consumption for a date (reuses PlanDay shape)."""
-    conn = get_connection(db_path)
-    row = conn.execute("SELECT * FROM actuals WHERE date = ?", (str(d),)).fetchone()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT * FROM actuals WHERE date = %s", (d,))
+        row = cur.fetchone()
     if row is None:
         return None
     return PlanDay(
-        date=date.fromisoformat(row["date"]),
+        date=row["date"],
         small=row["small"],
         large=row["large"],
         total_mg=row["total_mg"],
     )
 
 
-def get_most_recent_actual(db_path: Path = DB_PATH) -> PlanDay | None:
+def get_most_recent_actual() -> PlanDay | None:
     """Get the most recent actual entry."""
-    conn = get_connection(db_path)
-    row = conn.execute("SELECT * FROM actuals ORDER BY date DESC LIMIT 1").fetchone()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT * FROM actuals ORDER BY date DESC LIMIT 1")
+        row = cur.fetchone()
     if row is None:
         return None
     return PlanDay(
-        date=date.fromisoformat(row["date"]),
+        date=row["date"],
         small=row["small"],
         large=row["large"],
         total_mg=row["total_mg"],
     )
 
 
-def get_actuals_range(
-    from_date: date, to_date: date, db_path: Path = DB_PATH
-) -> list[PlanDay]:
+def get_actuals_range(from_date: date, to_date: date) -> list[PlanDay]:
     """Get actuals between two dates (inclusive)."""
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        "SELECT * FROM actuals WHERE date >= ? AND date <= ? ORDER BY date",
-        (str(from_date), str(to_date)),
-    ).fetchall()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM actuals WHERE date >= %s AND date <= %s ORDER BY date",
+            (from_date, to_date),
+        )
+        rows = cur.fetchall()
     return [
         PlanDay(
-            date=date.fromisoformat(r["date"]),
+            date=r["date"],
             small=r["small"],
             large=r["large"],
             total_mg=r["total_mg"],
@@ -195,19 +227,17 @@ def get_actuals_range(
     ]
 
 
-def get_plan_range(
-    from_date: date, to_date: date, db_path: Path = DB_PATH
-) -> list[PlanDay]:
+def get_plan_range(from_date: date, to_date: date) -> list[PlanDay]:
     """Get plan days between two dates (inclusive)."""
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        "SELECT * FROM plan_days WHERE date >= ? AND date <= ? ORDER BY date",
-        (str(from_date), str(to_date)),
-    ).fetchall()
-    conn.close()
+    with _connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            "SELECT * FROM plan_days WHERE date >= %s AND date <= %s ORDER BY date",
+            (from_date, to_date),
+        )
+        rows = cur.fetchall()
     return [
         PlanDay(
-            date=date.fromisoformat(r["date"]),
+            date=r["date"],
             small=r["small"],
             large=r["large"],
             total_mg=r["total_mg"],

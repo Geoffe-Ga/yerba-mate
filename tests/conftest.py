@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 import pytest
 
@@ -81,17 +85,26 @@ from helpers import make_plan_day as make_plan_day  # noqa: E402
 
 import db  # noqa: E402
 
+_TEST_DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://localhost:5432/yerba_mate_test",
+)
+
 # ---------------------------------------------------------------------------
 # Database fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path) -> Path:
-    """Create a temporary SQLite database with tables initialised."""
-    path = tmp_path / "test.db"
-    db.init_db(path)
-    return path
+def tmp_db() -> Generator[None, None, None]:
+    """Initialise the test database and truncate tables between tests."""
+    db.init_db(_TEST_DATABASE_URL)
+    with db._connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE plan_days, actuals")
+        conn.commit()
+    yield
+    db.close_db()
 
 
 # ---------------------------------------------------------------------------
