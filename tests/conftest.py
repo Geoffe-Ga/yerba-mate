@@ -33,6 +33,21 @@ def _passthrough(**_kwargs: Any) -> Any:
     return _decorator
 
 
+class _StubGroup:
+    """Minimal stub for ``app_commands.Group``.
+
+    Acts as a descriptor that, when accessed on a *class*, returns itself
+    so the ``plan_group.command(...)`` decorators work at import time.
+    """
+
+    def __init__(self, **_kwargs: Any) -> None:
+        pass
+
+    def command(self, **_kwargs: Any) -> Any:
+        """Mimic ``@group.command(...)`` — delegates to ``_passthrough``."""
+        return _passthrough(**_kwargs)
+
+
 def _install_discord_stubs() -> None:
     """Insert lightweight discord stubs so ``import commands`` works."""
     discord = types.ModuleType("discord")
@@ -47,6 +62,7 @@ def _install_discord_stubs() -> None:
     app_commands.describe = _passthrough  # type: ignore[attr-defined]
     app_commands.choices = _passthrough  # type: ignore[attr-defined]
     app_commands.Choice = MagicMock  # type: ignore[attr-defined]
+    app_commands.Group = _StubGroup  # type: ignore[attr-defined]
 
     ext = types.ModuleType("discord.ext")
     ext_commands = types.ModuleType("discord.ext.commands")

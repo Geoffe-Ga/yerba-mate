@@ -20,16 +20,18 @@ class YerbaCog(commands.Cog):
         self.bot = bot
 
     # ------------------------------------------------------------------
-    # /plan
+    # /plan  (command group: /plan create, /plan show)
     # ------------------------------------------------------------------
 
-    @app_commands.command(
-        name="plan", description="Generate a new caffeine reduction plan from today"
+    plan_group = app_commands.Group(name="plan", description="Plan management commands")
+
+    @plan_group.command(
+        name="create", description="Generate a new caffeine reduction plan from today"
     )
     @app_commands.describe(
         large="Number of large drinks per day", small="Number of small drinks per day"
     )
-    async def plan(
+    async def plan_create(
         self, interaction: discord.Interaction, large: int, small: int
     ) -> None:
         """Generate and persist a reduction plan starting today."""
@@ -37,6 +39,21 @@ class YerbaCog(commands.Cog):
         plan = generate_plan(small=small, large=large, start_date=today)
         db.save_plan(plan)
         embed = formatters.plan_embed(plan)
+        await interaction.response.send_message(embed=embed)
+
+    @plan_group.command(name="show", description="Display the current reduction plan")
+    async def plan_show(self, interaction: discord.Interaction) -> None:
+        """Display remaining plan days from today onward."""
+        today = date.today()
+        plan_days = db.get_plan_days_from(today)
+        if not plan_days:
+            await interaction.response.send_message(
+                "No plan exists. Use `/plan create` to get started.",
+                ephemeral=True,
+            )
+            return
+        embed = formatters.plan_embed(plan_days)
+        embed.title = "Current Plan (from today)"
         await interaction.response.send_message(embed=embed)
 
     # ------------------------------------------------------------------
