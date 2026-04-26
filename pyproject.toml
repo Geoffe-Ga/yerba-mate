@@ -117,6 +117,7 @@ strict_concatenate = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = ["discord.*", "apscheduler.*", "psycopg2.*"]

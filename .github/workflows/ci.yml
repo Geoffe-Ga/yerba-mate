@@ -104,9 +104,18 @@ jobs:
           retention-days: 30
 
       - name: Run pip-audit for dependency vulnerabilities
+        # CVE-2026-3219 (pip) is unfixable upstream — no patched version
+        # exists yet. pip is a build/install tool, not a runtime dependency
+        # of the deployed bot (see Procfile: `python bot.py`), so the
+        # tar/ZIP confusion described in the CVE is not exploitable in our
+        # production path. Re-evaluate when pip ships a fix.
+        # Reference: https://nvd.nist.gov/vuln/detail/CVE-2026-3219
+        # Alternative considered: pinning pip to a pre-CVE version — rejected
+        #   because older pips carry their own (different) CVEs.
+        # Review: 2026-07-26
         run: |
           pip-audit --desc --format json --output pip-audit-report.json || true
-          pip-audit --desc
+          pip-audit --desc --ignore-vuln CVE-2026-3219
         continue-on-error: false
 
       - name: Upload pip-audit report
