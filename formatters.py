@@ -1,11 +1,17 @@
-"""Discord embed formatting helpers for the yerba mate bot."""
+"""Plain-text formatting helpers for plan, status, and history views.
+
+The standalone Discord bot is retired (RubotPaul is the Discord interface
+now), so these builders return :class:`FormattedMessage` — pure data with
+the same code-block table layouts the old embeds carried. RubotPaul (or
+any other caller) decides how to render them; the Recovery Dharma tone
+guidance lives in the RubotPaul-side SKILL.md, not here.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
-
-import discord
 
 if TYPE_CHECKING:
     from planner import PlanDay
@@ -13,7 +19,21 @@ if TYPE_CHECKING:
 # Target ~34 chars wide for mobile Discord code blocks.
 # Date(5) Sm(3) Lg(3) mg(4) Drop(4) + separators = ~34
 _HDR = f"{'Date':<5} {'Sm':>2} {'Lg':>2} {'mg':>4} {'Drop':>4}"
-_SEP = "\u2500" * 22
+_SEP = "─" * 22
+
+# Discord caps embed/message descriptions at 4096 characters; keep the
+# tables renderable as-is even though this module no longer talks to
+# Discord itself.
+_BODY_LIMIT = 4096
+
+
+@dataclass(slots=True, frozen=True)
+class FormattedMessage:
+    """A rendered view: title, body, and an optional footer line."""
+
+    title: str
+    body: str
+    footer: str | None = None
 
 
 def _format_drinks(small: int, large: int) -> str:
@@ -37,17 +57,12 @@ def _row(d: date, small: int, large: int, mg: int, drop: str = "") -> str:
 
 
 def _make_table(lines: list[str]) -> str:
-    """Wrap lines in a Discord code block."""
+    """Wrap lines in a code block."""
     return "```\n" + "\n".join(lines) + "\n```"
 
 
-def plan_embed(plan: list[PlanDay]) -> discord.Embed:
+def plan_message(plan: list[PlanDay]) -> FormattedMessage:
     """Format the full tapering plan as a one-row-per-day table."""
-    embed = discord.Embed(
-        title="Yerba Mate Reduction Plan",
-        color=discord.Color.green(),
-    )
-
     lines = [_HDR, _SEP]
     prev_mg = 0
     for p in plan:
@@ -58,28 +73,23 @@ def plan_embed(plan: list[PlanDay]) -> discord.Embed:
         prev_mg = p.total_mg
         lines.append(_row(p.date, p.small, p.large, p.total_mg, drop))
 
-    table = _make_table(lines)
-
     start = plan[0].date
     end = plan[-1].date
-    embed.description = table
-    embed.set_footer(text=f"{len(plan)} days \u2014 {start} to {end}")
-    return embed
+    return FormattedMessage(
+        title="Yerba Mate Reduction Plan",
+        body=_make_table(lines),
+        footer=f"{len(plan)} days — {start} to {end}",
+    )
 
 
-def status_embed(
+def status_message(
     plan_day: PlanDay | None,
     actual: PlanDay | None,
     today: date,
-) -> discord.Embed:
+) -> FormattedMessage:
     """Format today's status as a compact table."""
-    embed = discord.Embed(
-        title=f"Status \u2014 {today.strftime('%b %d')}",
-        color=discord.Color.blue(),
-    )
-
     hdr = f"{'':>6} {'Sm':>2} {'Lg':>2} {'mg':>4}"
-    lines = [hdr, "\u2500" * 17]
+    lines = [hdr, "─" * 17]
 
     if plan_day:
         lines.append(
@@ -101,24 +111,22 @@ def status_embed(
         sign = "+" if delta > 0 else ""
         lines.append(f"{'Delta':>6} {'':>2} {'':>2} {sign}{delta:>3}")
 
-    embed.description = _make_table(lines)
-    return embed
-
-
-def log_confirmation_embed(
-    actual: PlanDay, plan_day: PlanDay | None, replaced: bool
-) -> discord.Embed:
-    """Confirmation embed after logging consumption."""
-    title = f"Logged \u2014 {actual.date.strftime('%b %d')}"
-    if replaced:
-        title += " (updated)"
-    embed = discord.Embed(
-        title=title,
-        color=discord.Color.gold() if replaced else discord.Color.green(),
+    return FormattedMessage(
+        title=f"Status — {today.strftime('%b %d')}",
+        body=_make_table(lines),
     )
 
+
+def log_confirmation_message(
+    actual: PlanDay, plan_day: PlanDay | None, replaced: bool
+) -> FormattedMessage:
+    """Confirmation message after logging consumption."""
+    title = f"Logged — {actual.date.strftime('%b %d')}"
+    if replaced:
+        title += " (updated)"
+
     hdr = f"{'':>6} {'Sm':>2} {'Lg':>2} {'mg':>4}"
-    lines = [hdr, "\u2500" * 17]
+    lines = [hdr, "─" * 17]
     lines.append(
         f"{'Actual':>6} {actual.small:>2} {actual.large:>2} {actual.total_mg:>4}"
     )
@@ -131,63 +139,55 @@ def log_confirmation_embed(
         sign = "+" if delta > 0 else ""
         lines.append(f"{'Delta':>6} {'':>2} {'':>2} {sign}{delta:>3}")
 
-    embed.description = _make_table(lines)
-    return embed
+    return FormattedMessage(title=title, body=_make_table(lines))
 
 
-def history_embed(
+def history_message(
     plan_days: dict[date, PlanDay],
     actuals: dict[date, PlanDay],
     from_date: date,
     to_date: date,
-) -> discord.Embed:
+) -> FormattedMessage:
     """Format history table of plan vs actual, one row per day."""
-    embed = discord.Embed(
-        title=f"History \u2014 {from_date} to {to_date}",
-        color=discord.Color.purple(),
-    )
     lines = [
         f"{'Date':<5} {'Plan':>4} {'Real':>4} {'Delta':>5}",
-        "\u2500" * 21,
+        "─" * 21,
     ]
 
     d = from_date
     while d <= to_date:
         plan = plan_days.get(d)
         actual = actuals.get(d)
-        p_str = str(plan.total_mg) if plan else "\u00b7"
-        a_str = str(actual.total_mg) if actual else "\u00b7"
+        p_str = str(plan.total_mg) if plan else "·"
+        a_str = str(actual.total_mg) if actual else "·"
         if plan and actual:
             delta = actual.total_mg - plan.total_mg
             sign = "+" if delta > 0 else ""
             d_str = f"{sign}{delta}"
         else:
-            d_str = "\u00b7"
+            d_str = "·"
         lines.append(f"{_ds(d):<5} {p_str:>4} {a_str:>4} {d_str:>5}")
         d += timedelta(days=1)
 
     table = _make_table(lines)
-    if len(table) <= 4096:
-        embed.description = table
-    else:
-        embed.description = table[:4093] + "```"
+    if len(table) > _BODY_LIMIT:
+        table = table[: _BODY_LIMIT - 3] + "```"
 
-    return embed
+    return FormattedMessage(
+        title=f"History — {from_date} to {to_date}",
+        body=table,
+    )
 
 
-def daily_ping_embed(plan_day: PlanDay | None, today: date) -> discord.Embed:
+def daily_ping_message(plan_day: PlanDay | None, today: date) -> FormattedMessage:
     """Format the daily reminder ping."""
     if plan_day:
         drinks = _format_drinks(plan_day.small, plan_day.large)
-        embed = discord.Embed(
-            title=f"Today's Target \u2014 {today.strftime('%b %d')}",
-            description=f"**{drinks}** \u2014 **{plan_day.total_mg} mg**",
-            color=discord.Color.teal(),
+        return FormattedMessage(
+            title=f"Today's Target — {today.strftime('%b %d')}",
+            body=f"**{drinks}** — **{plan_day.total_mg} mg**",
         )
-    else:
-        embed = discord.Embed(
-            title=f"No Plan for {today.strftime('%b %d')}",
-            description="Use `/plan` to create a reduction plan.",
-            color=discord.Color.light_grey(),
-        )
-    return embed
+    return FormattedMessage(
+        title=f"No Plan for {today.strftime('%b %d')}",
+        body="Use `/plan` to create a reduction plan.",
+    )
