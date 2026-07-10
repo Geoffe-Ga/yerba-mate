@@ -8,20 +8,29 @@ with no confirmation step, per the kit's safety model.
 
 DB access reuses the synchronous psycopg2 functions in db.py via
 ``asyncio.to_thread`` to keep churn minimal.
+
+Destructive operations (replanning) follow the draft→confirm→execute
+pattern: ``POST /api/v1/plan`` only stages a pending action and returns a
+preview; nothing is written until ``POST /api/v1/plan/confirm`` receives
+the action_id, which RubotPaul sends only after an explicit "confirm"
+reply in chat (see PIVOT.md). The pending store is an in-memory dict on
+the app — fine for the single-host VPS deployment.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date, timedelta
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from aiohttp import web
 
 import db
 from auth_middleware import aiohttp_auth_middleware
-from planner import LARGE_MG, SMALL_MG
+from planner import LARGE_MG, SMALL_MG, generate_plan
 
 if TYPE_CHECKING:
     from auth_middleware import Handler
@@ -30,6 +39,25 @@ if TYPE_CHECKING:
 MIN_HISTORY_WEEKS = 1
 MAX_HISTORY_WEEKS = 52
 DEFAULT_HISTORY_WEEKS = 4
+
+PLAN_TTL_SECONDS = 300
+PLAN_STRATEGIES = ("replan", "catchup")
+
+
+@dataclass(slots=True)
+class PendingAction:
+    """A staged destructive action awaiting chat confirmation."""
+
+    kind: str
+    payload: dict[str, int | str]
+    expires_at: datetime
+    status: str = "pending"
+    action_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+
+PENDING_ACTIONS_KEY: web.AppKey[dict[str, PendingAction]] = web.AppKey(
+    "pending_actions", dict
+)
 
 
 @web.middleware
@@ -136,9 +164,111 @@ async def post_extra_endpoint(request: web.Request) -> web.Response:
     return _logged_response(today, small, large)
 
 
+async def post_plan_endpoint(request: web.Request) -> web.Response:
+    """Stage a plan replacement for confirmation. Writes nothing.
+
+    Returns a pending action_id plus a preview of the plan that
+    ``/plan/confirm`` would write, so RubotPaul can post a draft in chat.
+    """
+    body = await _read_json_object(request)
+    if body is None:
+        return _error_response("request body must be a JSON object")
+    small = _parse_count(body.get("small", 0))
+    large = _parse_count(body.get("large", 0))
+    if small is None or large is None:
+        return _error_response("large and small must be non-negative integers")
+    strategy = body.get("strategy", "replan")
+    if strategy not in PLAN_STRATEGIES:
+        return _error_response("strategy must be 'replan' or 'catchup'")
+    action = PendingAction(
+        kind="plan_create",
+        payload={"large": large, "small": small, "strategy": strategy},
+        expires_at=_utcnow() + timedelta(seconds=PLAN_TTL_SECONDS),
+    )
+    request.app[PENDING_ACTIONS_KEY][action.action_id] = action
+    preview = _staged_plan(small=small, large=large, strategy=strategy)
+    return web.json_response(
+        {
+            "status": "pending_confirmation",
+            "action_id": action.action_id,
+            "kind": action.kind,
+            "expires_in": PLAN_TTL_SECONDS,
+            "preview": {
+                "large": large,
+                "small": small,
+                "strategy": strategy,
+                "days": len(preview),
+                "starts_on": preview[0].date.isoformat() if preview else None,
+                "ends_on": preview[-1].date.isoformat() if preview else None,
+            },
+        }
+    )
+
+
+async def post_plan_confirm_endpoint(request: web.Request) -> web.Response:
+    """Execute a staged plan replacement after chat confirmation."""
+    body = await _read_json_object(request)
+    if body is None:
+        return _error_response("request body must be a JSON object")
+    action_id = body.get("action_id")
+    if not isinstance(action_id, str) or not action_id:
+        return _error_response("action_id must be a string")
+    action = request.app[PENDING_ACTIONS_KEY].get(action_id)
+    if action is None:
+        return _error_response("unknown action_id", status=404)
+    if action.status != "pending":
+        return _error_response("action already resolved", status=409)
+    if _utcnow() > action.expires_at:
+        action.status = "expired"
+        return _error_response("action expired", status=410)
+    plan = _staged_plan(
+        small=int(action.payload["small"]),
+        large=int(action.payload["large"]),
+        strategy=str(action.payload["strategy"]),
+    )
+    await asyncio.to_thread(db.save_plan, plan)
+    action.status = "approved"
+    return web.json_response(
+        {
+            "status": "executed",
+            "action_id": action.action_id,
+            "kind": action.kind,
+            "plan": {
+                "days": len(plan),
+                "starts_on": plan[0].date.isoformat() if plan else None,
+                "ends_on": plan[-1].date.isoformat() if plan else None,
+            },
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    """Return the current UTC time (separate for test injection)."""
+    return datetime.now(tz=UTC)
+
+
+def _staged_plan(*, small: int, large: int, strategy: str) -> list[PlanDay]:
+    """Build the plan a staged action would write.
+
+    ``replan`` restarts from today with the standard 2-day hold (like the
+    bot's /plan command); ``catchup`` starts tomorrow at the given level
+    and reduces immediately, preserving today's plan (like /adjust).
+    ``db.save_plan`` uses the first day as its deletion boundary, so the
+    start date also controls how much of the old plan survives.
+    """
+    if strategy == "replan":
+        return generate_plan(small=small, large=large, start_date=date.today())
+    return generate_plan(
+        small=small,
+        large=large,
+        start_date=date.today() + timedelta(days=1),
+        skip_hold=True,
+    )
 
 
 def _error_response(message: str, status: int = 400) -> web.Response:
@@ -242,6 +372,9 @@ def build_app() -> web.Application:
     api_app.router.add_get("/history", get_history_endpoint)
     api_app.router.add_post("/log", post_log_endpoint)
     api_app.router.add_post("/extra", post_extra_endpoint)
+    api_app.router.add_post("/plan", post_plan_endpoint)
+    api_app.router.add_post("/plan/confirm", post_plan_confirm_endpoint)
+    api_app[PENDING_ACTIONS_KEY] = {}
 
     app = web.Application()
     app.router.add_get("/healthz", healthz_endpoint)
