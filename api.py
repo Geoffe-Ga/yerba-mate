@@ -21,18 +21,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from aiohttp import web
+from dotenv import load_dotenv
 
 import db
 from auth_middleware import aiohttp_auth_middleware
 from planner import LARGE_MG, SMALL_MG, generate_plan
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from auth_middleware import Handler
     from planner import PlanDay
 
@@ -380,3 +385,96 @@ def build_app() -> web.Application:
     app.router.add_get("/healthz", healthz_endpoint)
     app.add_subapp("/api/v1", api_app)
     return app
+
+
+# ---------------------------------------------------------------------------
+# Standalone entrypoint (VPS systemd --user service on localhost:8001)
+# ---------------------------------------------------------------------------
+
+API_HOST = "127.0.0.1"
+DEFAULT_API_PORT = 8001
+MAX_TCP_PORT = 65535
+REQUIRED_ENV_VARS = ("RUBOTPAUL_SHARED_SECRET", "DATABASE_URL")
+
+
+class ApiConfigError(RuntimeError):
+    """Raised when the environment is missing or invalid at boot."""
+
+
+@dataclass(slots=True, frozen=True)
+class ApiConfig:
+    """Validated boot configuration for the standalone API process."""
+
+    database_url: str
+    port: int
+
+
+def load_config(env: Mapping[str, str] | None = None) -> ApiConfig:
+    """Read and validate entrypoint configuration from the environment.
+
+    Fails fast with one error naming every missing required variable, so a
+    misconfigured systemd unit is diagnosable from a single journal line.
+    """
+    env = os.environ if env is None else env
+
+    missing = [name for name in REQUIRED_ENV_VARS if not env.get(name)]
+    if missing:
+        raise ApiConfigError(
+            "Missing required environment variables: " + ", ".join(missing)
+        )
+
+    raw_port = env.get("YERBA_API_PORT") or str(DEFAULT_API_PORT)
+    try:
+        port = int(raw_port)
+    except ValueError:
+        raise ApiConfigError(
+            f"YERBA_API_PORT must be an integer, got {raw_port!r}"
+        ) from None
+    if not 1 <= port <= MAX_TCP_PORT:
+        raise ApiConfigError(
+            f"YERBA_API_PORT must be between 1 and {MAX_TCP_PORT}, got {port}"
+        )
+
+    return ApiConfig(database_url=env["DATABASE_URL"], port=port)
+
+
+async def serve(config: ApiConfig, *, stop_event: asyncio.Event | None = None) -> None:
+    """Run the API on 127.0.0.1 until SIGINT/SIGTERM (or ``stop_event``).
+
+    Initialises the database schema at boot, installs signal handlers so
+    ``systemctl --user stop`` shuts down gracefully, and always releases
+    the listening socket and DB pool on the way out.
+    """
+    db.init_db(config.database_url)
+    runner = web.AppRunner(build_app())
+    await runner.setup()
+    try:
+        site = web.TCPSite(runner, API_HOST, config.port)
+        await site.start()
+
+        stop = stop_event if stop_event is not None else asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, stop.set)
+        try:
+            await stop.wait()
+        finally:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.remove_signal_handler(sig)
+    finally:
+        await runner.cleanup()
+        db.close_db()
+
+
+def main() -> None:
+    """Entrypoint for ``python api.py``: load env, validate, serve."""
+    load_dotenv()
+    try:
+        config = load_config()
+    except ApiConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+    asyncio.run(serve(config))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,21 +1,23 @@
-# Yerba Mate Reduction Bot
+# Yerba Mate Reduction Service
 
 > Step down. Don't crash.
 
-A Discord bot for the **Conscious Biohacker** who wants to reduce caffeine intake from yerba mate **without triggering withdrawal symptoms** — the headaches, brain fog, fatigue, and irritability that come from quitting cold turkey.
+A caffeine-tapering service for the **Conscious Biohacker** who wants to reduce caffeine intake from yerba mate **without triggering withdrawal symptoms** — the headaches, brain fog, fatigue, and irritability that come from quitting cold turkey.
+
+It runs as a small HTTP API behind [RubotPaul](https://github.com/Geoffe-Ga) (the household OpenClaw assistant), which is the Discord-facing interface. The original standalone Discord bot is retired; see [Migration note](#migration-note-discord-bot-retired).
 
 ## Mission
 
 Caffeine withdrawal is a real pharmacological event. The standard literature (and lived experience) shows that abrupt reductions of more than ~25% of daily intake can trigger 2–9 days of unpleasant symptoms. The *Conscious Biohacker* approach is to **taper gradually** — small, regular drops your adenosine receptors can adapt to — instead of quitting outright.
 
-This bot exists because doing that taper by hand is annoying:
+This service exists because doing that taper by hand is annoying:
 
 1. You have to compute a step-down schedule that never drops too fast.
 2. You have to remember your daily target every morning.
 3. You inevitably miss a day or drink extra, and the plan needs to recover gracefully.
 4. You want to look back and see whether you actually stuck to the plan.
 
-The bot automates all four. It generates a personalized tapering plan from your current intake, pings you each morning at 6 AM Pacific with that day's target, lets you log actual consumption (including extras, slips, and adjustments), and recalibrates the plan when life happens.
+The service automates all four. It generates a personalized tapering plan from your current intake, serves each day's target for RubotPaul's 6 AM Pacific reminder, records actual consumption (including extras, slips, and adjustments), and recalibrates the plan when life happens.
 
 ## How the Reduction Algorithm Works
 
@@ -48,67 +50,56 @@ Starting from `(L large + S small)` drinks per day, the algorithm steps down by:
 
 About 18 days from `(0S + 3L)` to a single small drink. Total caffeine load drops by ~75% with every step well below the withdrawal threshold.
 
-## Slash Command Reference
+## API Reference
 
-The bot exposes its behavior entirely through Discord slash commands. Once invited to a server, the commands appear in the autocomplete drawer.
+Every `/api/v1/*` route requires the RubotPaul HMAC bearer token (see
+[Authentication](#authentication)); `GET /healthz` is unauthenticated.
 
-### `/plan create large:<int> small:<int>`
-Generates and persists a fresh tapering plan starting **today**, replacing any future plan days.
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /healthz` | Liveness probe → `{"ok": true}`. |
+| `GET /api/v1/plan` | Full tapering plan with `starts_on`/`ends_on`. |
+| `GET /api/v1/status` | Today's plan vs actual with `delta_mg` and `on_track` (404 if no plan for today). |
+| `GET /api/v1/history?weeks=N` | Plan-vs-actual rows merged by date (default 4 weeks, max 52). |
+| `POST /api/v1/log` | Record actual consumption `{large, small, date?}` — immediate write. |
+| `POST /api/v1/extra` | Increment today's actuals by one `{size: "large"\|"small"}` — immediate write. |
+| `POST /api/v1/plan` | **Destructive.** Stage a replan `{large, small, strategy: "replan"\|"catchup"}`; returns `action_id` + preview, writes nothing. |
+| `POST /api/v1/plan/confirm` | Execute a staged replan `{action_id}` exactly once (404 unknown, 410 expired, 409 already resolved). |
 
-### `/plan show`
-Displays the remaining plan from today onward as a Discord embed.
+Replanning follows the kit-wide **draft → confirm → execute** pattern: RubotPaul posts the preview to chat, waits for an explicit "confirm" reply, and only then calls `/plan/confirm`.
 
-### `/log large:<int> small:<int> date_str:<optional>`
-Records actual consumption. `date_str` accepts `today` (default), `yesterday`, or `YYYY-MM-DD`. Future dates are rejected. Re-logging the same date overwrites the previous entry.
+### Daily reminder
 
-### `/extra size:<large|small>`
-Increments today's actual log by one drink. Useful when you grab a "just one more" without wanting to retype the full count.
+The 06:00 US/Pacific target ping now lives in **RubotPaul's scheduler**: it calls `GET /api/v1/status` and posts the result to Discord itself. This service has no scheduler of its own.
 
-### `/adjust strategy:<replan|catchup>`
-Recalibrates the plan based on your most recent actual consumption.
+### Authentication
 
-| Strategy | Behavior |
-|----------|----------|
-| `replan` *(default)* | Generate a new tapering schedule starting tomorrow from your most recent actual level. |
-| `catchup` | Hold at the current actual level for as many days as needed, then rejoin the original plan when it dips down to that level. |
-
-Use `replan` if you've truly fallen behind. Use `catchup` if you had a one-off slip and want to preserve the original schedule.
-
-### `/status`
-Shows today's planned vs actual consumption with the delta.
-
-### `/history weeks:<int>`
-Shows planned vs actual for the past N weeks (default 4) as a one-row-per-day table.
-
-### Daily Reminder (automatic)
-Every day at **06:00 US/Pacific**, the bot posts an embed to `PING_CHANNEL_ID` with the day's target consumption. If no plan exists, it nudges you to create one.
+Requests carry `Authorization: Bearer <caller_id>.<timestamp>.<hmac_hex>`, an HMAC-SHA256 over `<caller_id>.<timestamp>` with `RUBOTPAUL_SHARED_SECRET` (300 s TTL). The middleware is vendored in `auth_middleware.py`, shared verbatim across the RubotPaul-callable services.
 
 ## Architecture
 
-The codebase is small (~600 LOC) and deliberately split into single-purpose modules with a strict dependency graph:
+The codebase is small and deliberately split into single-purpose modules with a strict dependency graph:
 
 ```
-bot.py ──────┐
-             ├──► commands.py ──► planner.py  (pure)
-             │         │
-             │         └──► db.py    ──► PostgreSQL
-             │         │
-             │         └──► formatters.py
-             │
-             └──► db.py        ──► PostgreSQL
-             └──► formatters.py
+api.py ──► auth_middleware.py  (pure)
+   │
+   ├──► planner.py  (pure)
+   │
+   ├──► db.py       ──► PostgreSQL
+   │
+formatters.py  (pure, RubotPaul-side rendering helpers)
 ```
 
-| Module             | Responsibility                                                          | Side effects |
-|--------------------|-------------------------------------------------------------------------|:------------:|
-| `bot.py`           | Discord client setup, scheduler, daily ping, cog loading                | Network, time |
-| `commands.py`      | Slash command cog: parses interactions, orchestrates planner + db + formatters | Network, DB |
-| `planner.py`       | Pure-function tapering algorithm                                        | None         |
-| `db.py`            | PostgreSQL connection pool + plan/actuals persistence                   | DB           |
-| `formatters.py`    | Discord `Embed` builders (tables, deltas, status)                       | None         |
-| `main.py`          | Original standalone TSV-printing script (kept for reference / cron use) | stdout       |
+| Module              | Responsibility                                                        | Side effects |
+|---------------------|------------------------------------------------------------------------|:------------:|
+| `api.py`            | aiohttp app factory, endpoints, staged-confirmation store, entrypoint  | Network, DB  |
+| `auth_middleware.py`| Vendored RubotPaul HMAC bearer auth                                    | None         |
+| `planner.py`        | Pure-function tapering algorithm                                       | None         |
+| `db.py`             | PostgreSQL connection pool + plan/actuals persistence                  | DB           |
+| `formatters.py`     | Plain-text table builders (`FormattedMessage`) for RubotPaul rendering | None         |
+| `main.py`           | Original standalone TSV-printing script (kept for reference / cron use)| stdout       |
 
-The dependency graph is acyclic: `planner` and `formatters` are pure and free of I/O, `db` knows nothing about Discord, and `commands` is the only place where domain logic, persistence, and presentation meet.
+The dependency graph is acyclic: `planner` and `formatters` are pure and free of I/O, `db` knows nothing about HTTP, and `api` is the only place where domain logic, persistence, and transport meet.
 
 ### Data model
 
@@ -132,24 +123,18 @@ CREATE TABLE actuals (
 
 The same `PlanDay` dataclass is reused for both plan rows and actual rows, since the shape is identical. `total_mg` is denormalized so the database can be queried for trends without recomputing.
 
-`save_plan` / `replace_plan_from_date` always treat the plan as **append-from-cutoff**: history before the cutoff is preserved so the `/history` command can show what *was* planned even after a `/adjust`.
-
-### Scheduling
-
-Daily reminders run on `APScheduler`'s `AsyncIOScheduler` co-located with the Discord event loop, with a `CronTrigger` pinned to `US/Pacific` and a 1-hour `misfire_grace_time` so a brief restart doesn't skip the morning ping.
+`save_plan` / `replace_plan_from_date` always treat the plan as **append-from-cutoff**: history before the cutoff is preserved so the history view can show what *was* planned even after a replan.
 
 ## Code & Technology Choices
 
 | Choice | Why |
 |--------|-----|
-| **Python 3.12** | Modern type syntax, `dataclass(slots=True)`, no FFI complications. Pinned via `runtime.txt` for Heroku-style deploys. |
-| **discord.py 2.x** | First-class slash command support via `app_commands`. Cog pattern keeps `bot.py` tiny. |
-| **APScheduler** | Async-native scheduler that lives in the same event loop as the bot — no second process, no cron container. |
-| **PostgreSQL via psycopg2** | Persistent across restarts (Discord bots restart often). The `SimpleConnectionPool` keeps connection setup cheap without an ORM. |
+| **Python 3.12** | Modern type syntax, `dataclass(slots=True)`, no FFI complications. |
+| **aiohttp** | Small async HTTP server; the whole service is one event loop, no framework overhead. |
+| **PostgreSQL via psycopg2** | Persistent across restarts. The `SimpleConnectionPool` keeps connection setup cheap without an ORM; handlers wrap the sync calls in `asyncio.to_thread`. |
 | **No ORM** | Two tables, hand-written SQL, full control over upsert semantics with `ON CONFLICT DO UPDATE`. SQLAlchemy would be overkill. |
 | **Pure-function planner** | `planner.py` has zero side effects → trivially unit-testable, deterministic, and reusable from the standalone `main.py` script. |
 | **Dataclasses with `slots=True`** | Memory-efficient, immutable-feeling, free `__init__`/`__repr__`. |
-| **Embed-based output** | Discord embeds render fixed-width code blocks reliably across desktop and mobile, which the table layouts in `formatters.py` exploit. |
 | **`python-dotenv`** | Env-var configuration only — no config files, secrets stay out of the repo. |
 
 ### Quality tooling
@@ -167,54 +152,78 @@ All of these run via `./scripts/check-all.sh` (Gate 1 of the Stay Green workflow
 
 ## Setup
 
-### 1. Create a Discord Bot
-1. Visit the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Create an application → add a Bot.
-3. Enable the `applications.commands` scope.
-4. Generate an invite URL and invite the bot to your server.
+### 1. Provision a PostgreSQL database
+Anywhere you can get a connection string — Supabase, Neon, or local `postgres`. On the VPS, a local Postgres keeps everything on-box.
 
-### 2. Provision a PostgreSQL database
-Anywhere you can get a connection string — Supabase, Heroku Postgres, Neon, or local `postgres`.
-
-### 3. Configure environment
-Create a `.env` file:
+### 2. Configure environment
+Create a `.env` file (see `.env.example`):
 ```
-DISCORD_TOKEN=your-bot-token
-PING_CHANNEL_ID=your-channel-id
 DATABASE_URL=postgres://user:pass@host:5432/dbname
+RUBOTPAUL_SHARED_SECRET=shared-secret-also-known-to-rubotpaul
+YERBA_API_PORT=8001
 ```
 
-### 4. Install and run
+The entrypoint fails fast at boot, naming every missing variable, so a misconfigured unit is diagnosable from a single journal line.
+
+### 3. Install and run
 ```bash
 pip install -r requirements.txt
-python bot.py
+python api.py
 ```
 
-For Heroku-style deploys the included `Procfile` runs the bot as a `worker` dyno.
+The server binds `127.0.0.1:$YERBA_API_PORT` (default **8001**) — it is reachable only from the same host (RubotPaul lives there too; remote access goes over Tailscale to RubotPaul, never to this port directly).
+
+### 4. Run as a systemd --user service (VPS deployment)
+
+`~/.config/systemd/user/yerba-mate.service`:
+
+```ini
+[Unit]
+Description=Yerba mate reduction API for RubotPaul
+After=network.target
+
+[Service]
+WorkingDirectory=%h/apps/yerba-mate
+EnvironmentFile=%h/apps/yerba-mate/.env
+ExecStart=%h/apps/yerba-mate/.venv/bin/python api.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now yerba-mate.service
+```
+
+`SIGTERM` from `systemctl --user stop` shuts the server down gracefully (socket released, DB pool closed).
+
+## Migration note: Discord bot retired
+
+This repo previously shipped a standalone Discord bot (`bot.py` + a slash-command cog) with an APScheduler 6 AM ping. Per the RubotPaul migration (see the kit's `PIVOT.md`), RubotPaul is now the single Discord interface: it calls this API and renders the results in chat, and its scheduler owns the morning reminder. The **Recovery Dharma tone guidance** (warm, no shame on slip-ups, never push abstinence) lives in the RubotPaul-side `SKILL.md` — this service just serves data. `formatters.py` survives as pure table builders RubotPaul can reuse.
 
 ## Project Structure
 
 ```
 yerba-mate/
-├── bot.py            # Discord client, scheduler, daily ping
-├── commands.py       # Slash command cog
-├── planner.py        # Pure-function reduction algorithm
-├── db.py             # PostgreSQL persistence
-├── formatters.py     # Discord embed builders
-├── main.py           # Standalone TSV-printing script (legacy / cron)
-├── requirements.txt  # Runtime deps
-├── pyproject.toml    # Tooling config (mypy / ruff / pytest / coverage)
-├── Procfile          # Heroku worker entrypoint
-├── runtime.txt       # Python 3.12.12
-├── scripts/          # check-all.sh, test.sh, lint.sh, format.sh, security.sh
-├── tests/            # unit / integration / property tests
-└── CLAUDE.md         # Engineering doctrine
+├── api.py             # aiohttp endpoints + standalone entrypoint (python api.py)
+├── auth_middleware.py # Vendored RubotPaul HMAC bearer auth
+├── planner.py         # Pure-function reduction algorithm
+├── db.py              # PostgreSQL persistence
+├── formatters.py      # Plain-text table builders for RubotPaul rendering
+├── main.py            # Standalone TSV-printing script (legacy / cron)
+├── requirements.txt   # Runtime deps
+├── pyproject.toml     # Tooling config (mypy / ruff / pytest / coverage)
+├── runtime.txt        # Python 3.12.12
+├── scripts/           # check-all.sh, test.sh, lint.sh, format.sh, security.sh
+├── tests/             # unit / integration / property tests
+└── CLAUDE.md          # Engineering doctrine
 ```
 
 ## Dependencies
 
-- [discord.py](https://github.com/Rapptz/discord.py) — Discord API wrapper with slash commands.
-- [APScheduler](https://github.com/agronholm/apscheduler) — async daily ping scheduler.
+- [aiohttp](https://github.com/aio-libs/aiohttp) — async HTTP server for the API.
 - [psycopg2-binary](https://www.psycopg.org/) — PostgreSQL driver.
 - [python-dotenv](https://github.com/theskumar/python-dotenv) — `.env` loader.
 
