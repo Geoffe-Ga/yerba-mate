@@ -69,6 +69,16 @@ class TestAuthRequired:
         assert response.status == 401
         assert await response.json() == {"error": "missing bearer token"}
 
+    @pytest.mark.parametrize("path", ["/api/v1/log", "/api/v1/extra"])
+    async def test_missing_bearer_on_write_returns_401(
+        self, client: TestClient, path: str
+    ) -> None:
+        """Test that write requests without an Authorization header get 401."""
+        response = await client.post(path, json={})
+
+        assert response.status == 401
+        assert await response.json() == {"error": "missing bearer token"}
+
 
 class TestGetPlan:
     """Tests for GET /api/v1/plan."""
@@ -288,3 +298,261 @@ class TestGetHistory:
         assert response.status == 200
         assert await response.json() == {"history": []}
         assert seen_ranges == [(today - timedelta(weeks=4), today)] * 2
+
+
+class TestPostLog:
+    """Tests for POST /api/v1/log."""
+
+    @staticmethod
+    def _capture_upsert(
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> list[tuple[date, int, int]]:
+        """Stub db.upsert_actual and record its call arguments."""
+        calls: list[tuple[date, int, int]] = []
+
+        def fake_upsert(d: date, small: int, large: int) -> None:
+            calls.append((d, small, large))
+
+        monkeypatch.setattr(db, "upsert_actual", fake_upsert)
+        return calls
+
+    async def test_log_writes_immediately(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that a valid log request writes without any confirmation step."""
+        calls = self._capture_upsert(monkeypatch)
+        today = date.today()
+
+        response = await client.post(
+            "/api/v1/log",
+            json={"large": 2, "small": 1},
+            headers=_auth_headers(),
+        )
+
+        assert response.status == 200
+        assert calls == [(today, 1, 2)]
+        assert await response.json() == {
+            "date": today.isoformat(),
+            "small": 1,
+            "large": 2,
+            "total_mg": 415,
+        }
+
+    async def test_log_accepts_explicit_today(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that date="today" resolves to the current date."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log",
+            json={"large": 1, "small": 0, "date": "today"},
+            headers=_auth_headers(),
+        )
+
+        assert response.status == 200
+        assert calls == [(date.today(), 0, 1)]
+
+    async def test_log_accepts_iso_date(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that an explicit ISO date is written as given."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log",
+            json={"large": 0, "small": 3, "date": "2026-07-01"},
+            headers=_auth_headers(),
+        )
+
+        assert response.status == 200
+        assert calls == [(date(2026, 7, 1), 3, 0)]
+        assert await response.json() == {
+            "date": "2026-07-01",
+            "small": 3,
+            "large": 0,
+            "total_mg": 345,
+        }
+
+    async def test_missing_counts_default_to_zero(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that omitted large/small fields default to zero."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log", json={"large": 1}, headers=_auth_headers()
+        )
+
+        assert response.status == 200
+        assert calls == [(date.today(), 0, 1)]
+
+    @pytest.mark.parametrize("body", [{"large": -1}, {"small": -2, "large": 1}])
+    async def test_negative_counts_return_400(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        body: dict[str, int],
+    ) -> None:
+        """Test that negative drink counts are rejected without writing."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post("/api/v1/log", json=body, headers=_auth_headers())
+
+        assert response.status == 400
+        assert await response.json() == {
+            "error": "large and small must be non-negative integers"
+        }
+        assert calls == []
+
+    @pytest.mark.parametrize("bad_count", ["2", 1.5, True, None])
+    async def test_non_integer_counts_return_400(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_count: object,
+    ) -> None:
+        """Test that non-integer drink counts are rejected without writing."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log",
+            json={"large": bad_count},
+            headers=_auth_headers(),
+        )
+
+        assert response.status == 400
+        assert await response.json() == {
+            "error": "large and small must be non-negative integers"
+        }
+        assert calls == []
+
+    @pytest.mark.parametrize("bad_date", ["07/01/2026", "yesterday", ""])
+    async def test_malformed_date_returns_400(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        bad_date: str,
+    ) -> None:
+        """Test that a date that is neither "today" nor ISO gets 400."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log",
+            json={"large": 1, "date": bad_date},
+            headers=_auth_headers(),
+        )
+
+        assert response.status == 400
+        assert await response.json() == {
+            "error": 'date must be "today" or an ISO date (YYYY-MM-DD)'
+        }
+        assert calls == []
+
+    async def test_invalid_json_body_returns_400(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that a non-JSON body is rejected with a clear error."""
+        calls = self._capture_upsert(monkeypatch)
+
+        response = await client.post(
+            "/api/v1/log",
+            data="not json",
+            headers={**_auth_headers(), "Content-Type": "application/json"},
+        )
+
+        assert response.status == 400
+        assert await response.json() == {"error": "request body must be a JSON object"}
+        assert calls == []
+
+
+class TestPostExtra:
+    """Tests for POST /api/v1/extra."""
+
+    @staticmethod
+    def _patch_db(
+        monkeypatch: pytest.MonkeyPatch, existing: PlanDay | None
+    ) -> list[tuple[date, int, int]]:
+        """Stub today's actual and record upsert_actual call arguments."""
+        calls: list[tuple[date, int, int]] = []
+
+        def fake_upsert(d: date, small: int, large: int) -> None:
+            calls.append((d, small, large))
+
+        monkeypatch.setattr(db, "get_actual", lambda _d: existing)
+        monkeypatch.setattr(db, "upsert_actual", fake_upsert)
+        return calls
+
+    async def test_extra_increments_existing_counts(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that an extra large drink adds to today's logged counts."""
+        today = date.today()
+        calls = self._patch_db(monkeypatch, make_plan_day(today, small=1, large=2))
+
+        response = await client.post(
+            "/api/v1/extra", json={"size": "large"}, headers=_auth_headers()
+        )
+
+        assert response.status == 200
+        assert calls == [(today, 1, 3)]
+        assert await response.json() == {
+            "date": today.isoformat(),
+            "small": 1,
+            "large": 3,
+            "total_mg": 565,
+        }
+
+    async def test_extra_small_with_no_existing_actual(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that the first extra of the day starts from zero counts."""
+        today = date.today()
+        calls = self._patch_db(monkeypatch, None)
+
+        response = await client.post(
+            "/api/v1/extra", json={"size": "small"}, headers=_auth_headers()
+        )
+
+        assert response.status == 200
+        assert calls == [(today, 1, 0)]
+        assert await response.json() == {
+            "date": today.isoformat(),
+            "small": 1,
+            "large": 0,
+            "total_mg": 115,
+        }
+
+    @pytest.mark.parametrize("body", [{"size": "medium"}, {"size": 3}, {}])
+    async def test_bad_size_returns_400(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        body: dict[str, object],
+    ) -> None:
+        """Test that sizes other than "large"/"small" are rejected."""
+        calls = self._patch_db(monkeypatch, None)
+
+        response = await client.post(
+            "/api/v1/extra", json=body, headers=_auth_headers()
+        )
+
+        assert response.status == 400
+        assert await response.json() == {"error": "size must be 'large' or 'small'"}
+        assert calls == []
+
+    async def test_invalid_json_body_returns_400(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that a non-JSON body is rejected with a clear error."""
+        calls = self._patch_db(monkeypatch, None)
+
+        response = await client.post(
+            "/api/v1/extra",
+            data="[1, 2]",
+            headers={**_auth_headers(), "Content-Type": "application/json"},
+        )
+
+        assert response.status == 400
+        assert await response.json() == {"error": "request body must be a JSON object"}
+        assert calls == []

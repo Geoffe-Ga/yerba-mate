@@ -1,8 +1,10 @@
-"""Read-only HTTP API for RubotPaul.
+"""HTTP API for RubotPaul.
 
-Exposes the tapering plan, today's status, and consumption history over
-aiohttp. Every ``/api/v1/*`` route sits behind the vendored HMAC bearer
-auth (see auth_middleware.py); ``/healthz`` is unauthenticated.
+Exposes the tapering plan, today's status, and consumption history, plus
+low-stakes write endpoints for logging drinks. Every ``/api/v1/*`` route
+sits behind the vendored HMAC bearer auth (see auth_middleware.py);
+``/healthz`` is unauthenticated. Low-stakes writes execute immediately
+with no confirmation step, per the kit's safety model.
 
 DB access reuses the synchronous psycopg2 functions in db.py via
 ``asyncio.to_thread`` to keep churn minimal.
@@ -11,6 +13,7 @@ DB access reuses the synchronous psycopg2 functions in db.py via
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -18,6 +21,7 @@ from aiohttp import web
 
 import db
 from auth_middleware import aiohttp_auth_middleware
+from planner import LARGE_MG, SMALL_MG
 
 if TYPE_CHECKING:
     from auth_middleware import Handler
@@ -72,7 +76,7 @@ async def get_status_endpoint(request: web.Request) -> web.Response:
     today = date.today()
     plan = await asyncio.to_thread(db.get_plan_day, today)
     if plan is None:
-        return web.json_response({"error": "no plan for today"}, status=404)
+        return _error_response("no plan for today", status=404)
     actual = _counts(await asyncio.to_thread(db.get_actual, today))
     return web.json_response(
         {
@@ -89,12 +93,9 @@ async def get_history_endpoint(request: web.Request) -> web.Response:
     """Return planned vs actual rows for the past ``?weeks=N`` weeks."""
     weeks = _parse_weeks(request.query.get("weeks", str(DEFAULT_HISTORY_WEEKS)))
     if weeks is None:
-        return web.json_response(
-            {
-                "error": "weeks must be an integer between "
-                f"{MIN_HISTORY_WEEKS} and {MAX_HISTORY_WEEKS}"
-            },
-            status=400,
+        return _error_response(
+            "weeks must be an integer between "
+            f"{MIN_HISTORY_WEEKS} and {MAX_HISTORY_WEEKS}"
         )
     today = date.today()
     from_date = today - timedelta(weeks=weeks)
@@ -103,9 +104,86 @@ async def get_history_endpoint(request: web.Request) -> web.Response:
     return web.json_response({"history": _merge_history(plan_rows, actual_rows)})
 
 
+async def post_log_endpoint(request: web.Request) -> web.Response:
+    """Log a day's consumption immediately (low-stakes write, no confirmation)."""
+    body = await _read_json_object(request)
+    if body is None:
+        return _error_response("request body must be a JSON object")
+    small = _parse_count(body.get("small", 0))
+    large = _parse_count(body.get("large", 0))
+    if small is None or large is None:
+        return _error_response("large and small must be non-negative integers")
+    log_date = _parse_log_date(body.get("date", "today"))
+    if log_date is None:
+        return _error_response('date must be "today" or an ISO date (YYYY-MM-DD)')
+    await asyncio.to_thread(db.upsert_actual, log_date, small, large)
+    return _logged_response(log_date, small, large)
+
+
+async def post_extra_endpoint(request: web.Request) -> web.Response:
+    """Add one extra drink to today's actuals (low-stakes write)."""
+    body = await _read_json_object(request)
+    if body is None:
+        return _error_response("request body must be a JSON object")
+    size = body.get("size")
+    if size not in ("large", "small"):
+        return _error_response("size must be 'large' or 'small'")
+    today = date.today()
+    current = _counts(await asyncio.to_thread(db.get_actual, today))
+    small = current["small"] + (1 if size == "small" else 0)
+    large = current["large"] + (1 if size == "large" else 0)
+    await asyncio.to_thread(db.upsert_actual, today, small, large)
+    return _logged_response(today, small, large)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _error_response(message: str, status: int = 400) -> web.Response:
+    """Build a JSON error body with the given status."""
+    return web.json_response({"error": message}, status=status)
+
+
+async def _read_json_object(request: web.Request) -> dict[str, object] | None:
+    """Read the request body as a JSON object, returning None when invalid."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _parse_count(value: object) -> int | None:
+    """Validate a drink count: a non-negative int (bools excluded), else None."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _parse_log_date(raw: object) -> date | None:
+    """Resolve a log date: "today" or an ISO date string, else None."""
+    if raw == "today":
+        return date.today()
+    if not isinstance(raw, str):
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _logged_response(d: date, small: int, large: int) -> web.Response:
+    """Serialize the state just written for a log/extra response."""
+    return web.json_response(
+        {
+            "date": d.isoformat(),
+            "small": small,
+            "large": large,
+            "total_mg": (SMALL_MG * small) + (LARGE_MG * large),
+        }
+    )
 
 
 def _parse_weeks(raw: str) -> int | None:
@@ -162,6 +240,8 @@ def build_app() -> web.Application:
     api_app.router.add_get("/plan", get_plan_endpoint)
     api_app.router.add_get("/status", get_status_endpoint)
     api_app.router.add_get("/history", get_history_endpoint)
+    api_app.router.add_post("/log", post_log_endpoint)
+    api_app.router.add_post("/extra", post_extra_endpoint)
 
     app = web.Application()
     app.router.add_get("/healthz", healthz_endpoint)
